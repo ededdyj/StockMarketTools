@@ -14,6 +14,9 @@ st.title("Eddy's Stocks - Personal Financial Dashboard")
 # Sidebar mode selector
 mode = st.sidebar.radio("Select Mode", ["Single Stock Analysis", "SP500 Deals", "Quality vs Value Screener"])
 
+########################################
+# SINGLE STOCK ANALYSIS MODE
+########################################
 if mode == "Single Stock Analysis":
     st.sidebar.header("Stock Ticker Input")
     ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
@@ -64,7 +67,6 @@ if mode == "Single Stock Analysis":
         # ---------------------
         st.subheader(f"Price History ({timeframe_option})")
         history = data.get("history", pd.DataFrame())
-
         if not history.empty:
             desired_metrics = {
                 "Current Price": info.get("currentPrice"),
@@ -96,7 +98,7 @@ if mode == "Single Stock Analysis":
         st.subheader("Free Cash Flow")
         cashflow = data.get("cashflow", pd.DataFrame())
         if not cashflow.empty:
-            cf_fig = plot_cashflow(cashflow)
+            cf_fig = plot_cash_flow = plot_cashflow(cashflow)
             if cf_fig:
                 st.plotly_chart(cf_fig)
             else:
@@ -105,7 +107,65 @@ if mode == "Single Stock Analysis":
             st.write("Cash flow data not available.")
 
         # ---------------------
-        # FAIR VALUE (DCF MODEL) + CONFIDENCE INTERVAL
+        # DIVIDEND SUMMARY SECTION
+        # ---------------------
+        st.subheader("Dividend Summary")
+        # Retrieve dividend-related info
+        dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
+        # Assume dividendYield is given as percent already (e.g., 0.55 means 0.55%)
+        dividend_yield = info.get("dividendYield")
+        ex_dividend_date = info.get("exDividendDate")
+        payout_ratio = info.get("payoutRatio")
+        current_price = info.get("currentPrice")
+
+        # Convert ex-dividend date from Unix timestamp to a readable string
+        if ex_dividend_date:
+            ex_div_date_str = pd.to_datetime(ex_dividend_date, unit="s").strftime('%Y-%m-%d')
+        else:
+            ex_div_date_str = "N/A"
+
+        # Calculate estimated dividend per year on a $10,000 investment.
+        # Since dividend_yield is already in percent, we convert it to decimal by dividing by 100.
+        est_dividend = None
+        if dividend_yield and current_price and dividend_yield > 0 and current_price > 0:
+            est_dividend = 10000 * (dividend_yield / 100)
+        elif dividend_rate and current_price and current_price > 0:
+            # Fallback: approximate yield using dividend_rate divided by current price.
+            est_dividend = (dividend_rate * 10000) / current_price
+
+        # Prepare display values. Since the yield is in percent already, simply format it.
+        if dividend_yield and dividend_yield > 0:
+            display_yield_pct = f"{dividend_yield:.2f}%"
+        else:
+            display_yield_pct = "N/A"
+
+        if payout_ratio and payout_ratio < 10_000:
+            display_payout_ratio = f"{payout_ratio:.2f}"
+        else:
+            display_payout_ratio = "N/A"
+
+        dividend_data = {
+            "Dividend Rate ($/share)": f"{dividend_rate:.2f}" if dividend_rate is not None else "N/A",
+            "Dividend Yield (%)": display_yield_pct,
+            "Ex-Dividend Date": ex_div_date_str,
+            "Payout Ratio": display_payout_ratio,
+        }
+        if est_dividend:
+            dividend_data["Est. Dividend per Year on $10,000"] = f"${est_dividend:,.2f}"
+        else:
+            dividend_data["Est. Dividend per Year on $10,000"] = "N/A"
+
+        # Convert all values to strings to avoid Arrow serialization errors.
+        df_dividend = (
+            pd.DataFrame(dividend_data, index=[0])
+            .T.reset_index()
+            .rename(columns={"index": "Dividend Metric", 0: "Value"})
+        )
+        df_dividend["Value"] = df_dividend["Value"].astype(str)
+        st.table(df_dividend)
+
+        # ---------------------
+        # FAIR VALUE (DCF MODEL) + CONFIDENCE INTERVAL SECTION
         # ---------------------
         st.subheader("Fair Value Calculation (DCF Model)")
         shares_outstanding = info.get("sharesOutstanding", None)
@@ -124,6 +184,9 @@ if mode == "Single Stock Analysis":
         else:
             st.write("Insufficient data to calculate Fair Value.")
 
+########################################
+# SP500 DEALS MODE
+########################################
 elif mode == "SP500 Deals":
     st.subheader("S&P 500 Deals Analysis")
     st.markdown("""
@@ -151,15 +214,16 @@ elif mode == "SP500 Deals":
 
     st.write(
         "This analysis calculates the fair value for each company in the S&P 500 and compares it with the current trading price to highlight the best deals. (Companies missing necessary data are skipped.)")
-
     with st.spinner("Analyzing S&P 500 companies..."):
         sp500_df = analyze_sp500_deals()
-
     if sp500_df is not None and not sp500_df.empty:
         st.dataframe(sp500_df.reset_index(drop=True))
     else:
         st.write("No data available from the S&P 500 analysis.")
 
+########################################
+# QUALITY VS VALUE SCREENER MODE
+########################################
 elif mode == "Quality vs Value Screener":
     st.subheader("Quality vs Value Screener")
     st.markdown("""
@@ -200,7 +264,7 @@ elif mode == "Quality vs Value Screener":
 
         st.dataframe(qv_df.reset_index(drop=True))
 
-        # Separate tables for top 20 leaders in each category:
+        # Provide separate tables with top 20 leaders for each category:
         st.subheader("Top 20 Leaders by Value Score")
         st.dataframe(qv_df.sort_values(by='Value Rank').head(20).reset_index(drop=True))
 
@@ -217,4 +281,3 @@ elif mode == "Quality vs Value Screener":
         st.dataframe(qv_df.sort_values(by='Overall Rank').head(20).reset_index(drop=True))
     else:
         st.write("No data available from the Quality vs. Value Screener.")
-
