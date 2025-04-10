@@ -19,9 +19,9 @@ Quality vs. Value Screener (CSV‑based)
 # 1. CSV paths for each preset universe
 # ---------------------------------------------------------------------------
 CSV_PATHS = {
-    "Dow 30": "data/dow30_tickers.csv",
     "S&P 500": "data/sp500_tickers.csv",
     "NASDAQ‑100": "data/nasdaq100_tickers.csv",
+    "Dow 30": "data/dow30_tickers.csv",
 }
 
 
@@ -40,7 +40,7 @@ def _load_tickers_from_csv(path: str) -> List[str]:
 def get_tickers(universe: str, uploaded_file=None) -> List[str]:
     """Return ticker list based on user choice or uploaded CSV."""
 
-    # 1️⃣  Uploaded CSV overrides preset lists
+    #  Uploaded CSV overrides preset lists
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
@@ -49,7 +49,7 @@ def get_tickers(universe: str, uploaded_file=None) -> List[str]:
             st.error(f"Could not read uploaded file: {e}")
             return []
 
-    # 2️⃣  Preset CSV based on universe
+    #  Preset CSV based on universe
     csv_path = CSV_PATHS.get(universe)
     if not csv_path:
         st.error(f"Unknown universe: {universe}")
@@ -70,7 +70,8 @@ def analyze_quality_value_screener():
 
     # ── Sidebar UI ──────────────────────────────────────────────────────
     st.sidebar.subheader("Universe")
-    universe = st.sidebar.selectbox("Choose a list of tickers", list(CSV_PATHS.keys()))
+    options = list(CSV_PATHS.keys())
+    universe = st.sidebar.selectbox("Choose a list of tickers", options, index=options.index("Dow 30"))
     uploaded_file = st.sidebar.file_uploader("…or upload a CSV with tickers", type="csv")
 
     tickers = get_tickers(universe, uploaded_file)
@@ -100,7 +101,12 @@ def analyze_quality_value_screener():
                 continue
 
             # Value score (positive only if undervalued)
-            value_score = max((fair_value - current_price) / fair_value, 0)
+            if fair_value and fair_value > 0:
+                discount_pct = ((fair_value - current_price) / current_price) * 100 if current_price else 0
+                value_score = max((fair_value - current_price) / fair_value, 0)
+            else:
+                discount_pct = None  # indicates fair value not meaningful
+                value_score = 0
 
             # Raw metrics --------------------------------------------------
             roe = info.get("returnOnEquity")
@@ -118,7 +124,7 @@ def analyze_quality_value_screener():
                 "Company": info.get("longName", ""),
                 "Current Price": current_price,
                 "Fair Value": fair_value,
-                "Discount (%)": ((fair_value - current_price) / current_price) * 100 if current_price else 0,
+                "Discount (%)": discount_pct,
                 "Value Score": value_score,
                 "Raw ROE": roe,
                 "Raw Revenue Growth": rev_growth,
