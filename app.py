@@ -1,5 +1,4 @@
 import yfinance as yf
-
 # Increase request timeout (adjust as needed)
 yf.shared._requests_kwargs = {"timeout": 60}
 
@@ -34,9 +33,9 @@ if mode == "Single Stock Analysis":
 
     # Map timeframe selection to yfinance history parameters
     if timeframe_option == "Intraday (1D)":
-        # Use 1D period, 5m interval to get more rows intraday
-        tf = {"period": "1d", "interval": "5m", "prepost": False}
-        st.info("Intraday (1D) chart displaying five-minute data (regular hours).")
+        # Use 1D period and 1-minute interval for intraday data (regular hours)
+        tf = {"period": "1d", "interval": "1m", "prepost": False}
+        st.info("Intraday (1D) chart displaying 1-minute data for regular market hours.")
     elif timeframe_option == "1 Week":
         start_date = (pd.Timestamp.today() - pd.DateOffset(days=7)).strftime("%Y-%m-%d")
         tf = {"start": start_date, "end": pd.Timestamp.today().strftime("%Y-%m-%d")}
@@ -113,7 +112,7 @@ if mode == "Single Stock Analysis":
         ############# Dividend & Distribution #############
         with st.expander("Dividend & Distribution"):
             dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
-            dividend_yield = info.get("dividendYield")
+            dividend_yield = info.get("dividendYield")  # already in percent (e.g. 0.55 means 0.55%)
             ex_dividend_date = info.get("exDividendDate")
             payout_ratio = info.get("payoutRatio")
             current_price = info.get("currentPrice")
@@ -164,7 +163,6 @@ if mode == "Single Stock Analysis":
                     st.write("No officer information available.")
             else:
                 st.write("No company officer information available.")
-
             st.markdown("**Risk Ratings:**")
             risk = {
                 "Audit Risk": info.get("auditRisk"),
@@ -174,7 +172,6 @@ if mode == "Single Stock Analysis":
                 "Overall Risk": info.get("overallRisk")
             }
             st.table(pd.DataFrame(risk.items(), columns=["Risk Metric", "Value"]))
-
             st.markdown("**Investor Relations Website:**")
             st.write(info.get("irWebsite", "N/A"))
 
@@ -193,8 +190,6 @@ if mode == "Single Stock Analysis":
         if not history.empty:
             price_fig = plot_price_history(history)
             st.plotly_chart(price_fig)
-
-            # Expander for raw price data debug info (DataFrame only)
             with st.expander("Raw Price Data Debug Info"):
                 st.write("### DataFrame Output")
                 st.write(history)
@@ -222,8 +217,7 @@ if mode == "Single Stock Analysis":
             if base_fair_value:
                 st.write(f"Calculated Fair Value (Enterprise Value per Share): **${base_fair_value:,.2f}**")
                 if fair_value_range is not None:
-                    st.write(
-                        f"Fair Value Confidence Interval: **${fair_value_range[0]:,.2f}** - **${fair_value_range[1]:,.2f}**")
+                    st.write(f"Fair Value Confidence Interval: **${fair_value_range[0]:,.2f}** - **${fair_value_range[1]:,.2f}**")
                 else:
                     st.write("Fair Value confidence interval could not be calculated due to missing data.")
             else:
@@ -245,26 +239,24 @@ elif mode == "SP500 Deals":
 
     For each company, fair value is estimated using a simplified Discounted Cash Flow (DCF) model that:
 
-    - **Extracts the most recent Free Cash Flow (FCF):**  
+    - **Extracts the most recent Free Cash Flow (FCF):**
       Uses the most recent FCF value from the company's cash flow statement.
 
-    - **Projects FCF for 5 years:**  
+    - **Projects FCF for 5 years:**
       Assumes an annual FCF growth rate of **3%** for the next 5 years.
 
-    - **Calculates Terminal Value:**  
+    - **Calculates Terminal Value:**
       Computes a terminal value at the end of the projection period using a terminal growth rate of **2%** and a discount rate of **10%**.
 
-    - **Discounts to Present Value:**  
+    - **Discounts to Present Value:**
       Discounts the projected FCF and terminal value back to the present using the discount rate.
 
-    - **Derives Fair Value per Share:**  
+    - **Derives Fair Value per Share:**
       Sums the present values to obtain the enterprise value and divides by the number of shares outstanding.
 
     **Note:** This simplified DCF model is for exploratory analysis and may not capture all complexities of a company’s valuation.
     """)
-
-    st.write(
-        "This analysis calculates the fair value for each company in the S&P 500 and compares it with the current trading price to highlight the best deals. (Companies missing necessary data are skipped.)")
+    st.write("This analysis calculates the fair value for each company in the S&P 500 and compares it with the current trading price to highlight the best deals. (Companies missing necessary data are skipped.)")
     with st.spinner("Analyzing S&P 500 companies..."):
         sp500_df = analyze_sp500_deals()
     if sp500_df is not None and not sp500_df.empty:
@@ -282,17 +274,17 @@ elif mode == "Quality vs Value Screener":
 
     This screener ranks S&P 500 stocks based on a composite score derived from:
 
-    - **Value Score:**  
+    - **Value Score:**
       The discount between the fair value (calculated via a simplified DCF model) and the current trading price.
       A higher discount (i.e., current price well below fair value) yields a higher value score.
 
-    - **Quality Score:**  
+    - **Quality Score:**
       Based on Return on Equity (ROE). Raw ROE values are converted into a percentile rank so that stocks with higher ROE receive higher scores.
 
-    - **Growth Score:**  
+    - **Growth Score:**
       Based on revenue growth, normalized by its percentile rank.
 
-    - **Stability Score:**  
+    - **Stability Score:**
       Based on debt-to-equity. Since lower debt is preferred, we invert the percentile ranking so that companies with lower ratios score higher.
 
     The overall score is calculated as:
@@ -301,10 +293,8 @@ elif mode == "Quality vs Value Screener":
 
     Stocks with a higher overall score are considered better opportunities from a quality and value perspective.
     """)
-
     with st.spinner("Analyzing S&P 500 stocks for quality and value..."):
         qv_df = analyze_quality_value_screener()
-
     if qv_df is not None and not qv_df.empty:
         # Add ranking columns for each individual score
         qv_df['Value Rank'] = qv_df['Value Score'].rank(method='min', ascending=False).astype(int)
@@ -312,22 +302,15 @@ elif mode == "Quality vs Value Screener":
         qv_df['Growth Rank'] = qv_df['Growth Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Stability Rank'] = qv_df['Stability Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Overall Rank'] = qv_df['Overall Score'].rank(method='min', ascending=False).astype(int)
-
         st.dataframe(qv_df.reset_index(drop=True))
-
-        # Provide separate tables with top 20 leaders for each category:
         st.subheader("Top 20 Leaders by Value Score")
         st.dataframe(qv_df.sort_values(by='Value Rank').head(20).reset_index(drop=True))
-
         st.subheader("Top 20 Leaders by Quality Score")
         st.dataframe(qv_df.sort_values(by='Quality Rank').head(20).reset_index(drop=True))
-
         st.subheader("Top 20 Leaders by Growth Score")
         st.dataframe(qv_df.sort_values(by='Growth Rank').head(20).reset_index(drop=True))
-
         st.subheader("Top 20 Leaders by Stability Score")
         st.dataframe(qv_df.sort_values(by='Stability Rank').head(20).reset_index(drop=True))
-
         st.subheader("Top 20 Leaders by Overall Score")
         st.dataframe(qv_df.sort_values(by='Overall Rank').head(20).reset_index(drop=True))
     else:
