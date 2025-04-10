@@ -5,10 +5,25 @@ import pandas as pd
 def plot_price_history(history_df):
     """
     Generates an interactive line chart of the closing price over time.
+    Works for both daily and intraday data.
     """
-    # Reset index so that the date becomes a column
+    # Make sure the index has a name; if not, give it one
+    if history_df.index.name is None:
+        history_df.index.name = "Datetime"
+
     df = history_df.reset_index()
-    fig = px.line(df, x='Date', y='Close', title='Price History (Close Price)')
+
+    # Use whatever the time column is called ("Date" or "Datetime")
+    time_col = df.columns[0]
+
+    fig = px.line(
+        df,
+        x=time_col,
+        y="Close",
+        title="Price History (Close Price)",
+        labels={time_col: "Time", "Close": "Price"},
+    )
+    fig.update_xaxes(rangeslider_visible=True)
     return fig
 
 
