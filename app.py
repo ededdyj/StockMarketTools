@@ -1,4 +1,5 @@
 import yfinance as yf
+
 # Increase request timeout (adjust as needed)
 yf.shared._requests_kwargs = {"timeout": 60}
 
@@ -112,7 +113,7 @@ if mode == "Single Stock Analysis":
         ############# Dividend & Distribution #############
         with st.expander("Dividend & Distribution"):
             dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
-            dividend_yield = info.get("dividendYield")  # already in percent (e.g. 0.55 means 0.55%)
+            dividend_yield = info.get("dividendYield")  # already in percent (e.g., 0.55 means 0.55%)
             ex_dividend_date = info.get("exDividendDate")
             payout_ratio = info.get("payoutRatio")
             current_price = info.get("currentPrice")
@@ -188,11 +189,15 @@ if mode == "Single Stock Analysis":
 
         history = data.get("history", pd.DataFrame())
         if not history.empty:
-            price_fig = plot_price_history(history)
+            # Reset the index, then if the resulting DataFrame contains a 'Date' column, rename it to 'Datetime'
+            df_history = history.reset_index()
+            if "Date" in df_history.columns and "Datetime" not in df_history.columns:
+                df_history = df_history.rename(columns={"Date": "Datetime"})
+            price_fig = plot_price_history(df_history)
             st.plotly_chart(price_fig)
             with st.expander("Raw Price Data Debug Info"):
                 st.write("### DataFrame Output")
-                st.write(history)
+                st.write(df_history)
         else:
             st.write("Historical data not available.")
 
@@ -217,7 +222,8 @@ if mode == "Single Stock Analysis":
             if base_fair_value:
                 st.write(f"Calculated Fair Value (Enterprise Value per Share): **${base_fair_value:,.2f}**")
                 if fair_value_range is not None:
-                    st.write(f"Fair Value Confidence Interval: **${fair_value_range[0]:,.2f}** - **${fair_value_range[1]:,.2f}**")
+                    st.write(
+                        f"Fair Value Confidence Interval: **${fair_value_range[0]:,.2f}** - **${fair_value_range[1]:,.2f}**")
                 else:
                     st.write("Fair Value confidence interval could not be calculated due to missing data.")
             else:
@@ -256,7 +262,8 @@ elif mode == "SP500 Deals":
 
     **Note:** This simplified DCF model is for exploratory analysis and may not capture all complexities of a company’s valuation.
     """)
-    st.write("This analysis calculates the fair value for each company in the S&P 500 and compares it with the current trading price to highlight the best deals. (Companies missing necessary data are skipped.)")
+    st.write(
+        "This analysis calculates the fair value for each company in the S&P 500 and compares it with the current trading price to highlight the best deals. (Companies missing necessary data are skipped.)")
     with st.spinner("Analyzing S&P 500 companies..."):
         sp500_df = analyze_sp500_deals()
     if sp500_df is not None and not sp500_df.empty:
