@@ -189,15 +189,11 @@ if mode == "Single Stock Analysis":
 
         history = data.get("history", pd.DataFrame())
         if not history.empty:
-            # Reset the index, then if the resulting DataFrame contains a 'Date' column, rename it to 'Datetime'
-            df_history = history.reset_index()
-            if "Date" in df_history.columns and "Datetime" not in df_history.columns:
-                df_history = df_history.rename(columns={"Date": "Datetime"})
-            price_fig = plot_price_history(df_history)
+            price_fig = plot_price_history(history)
             st.plotly_chart(price_fig)
             with st.expander("Raw Price Data Debug Info"):
                 st.write("### DataFrame Output")
-                st.write(df_history)
+                st.write(history)
         else:
             st.write("Historical data not available.")
 

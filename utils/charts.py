@@ -7,9 +7,6 @@ def plot_price_history(history_df):
     Generates an interactive line chart of the closing price over time.
     Works for both daily and intraday data.
     """
-    # Make sure the index has a name; if not, give it one
-    if history_df.index.name is None:
-        history_df.index.name = "Datetime"
 
     df = history_df.reset_index()
 
