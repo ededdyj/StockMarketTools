@@ -1,4 +1,5 @@
 import yfinance as yf
+import numpy as np
 
 # Increase request timeout (adjust as needed)
 yf.shared._requests_kwargs = {"timeout": 60}
@@ -176,18 +177,43 @@ if mode == "Single Stock Analysis":
             st.markdown("**Investor Relations Website:**")
             st.write(info.get("irWebsite", "N/A"))
 
-        ############# Price History & Current Price Display #############
+        ############# Price History, Current Price & Time‑frame Performance #############
         st.subheader(f"Price History ({timeframe_option})")
-        current_price_val = info.get("currentPrice")
+
+        # --- Retrieve history first so we can compute the change ---
+        history = data.get("history", pd.DataFrame())
+
+        if not history.empty:
+            start_price = history["Close"].iloc[0]
+            end_price = history["Close"].iloc[-1]
+            pts_change = end_price - start_price
+            pct_change = (pts_change / start_price) * 100 if start_price else np.nan
+        else:
+            end_price = info.get("currentPrice", np.nan)
+            pts_change = pct_change = np.nan
+
         pre_market_val = info.get("preMarketPrice", "N/A")
         post_market_val = info.get("postMarketPrice", "N/A")
-        if current_price_val is not None:
-            st.header(f"Current Price: ${current_price_val}")
-            st.caption(f"Pre-market: ${pre_market_val} | Post-market: ${post_market_val}")
-        else:
-            st.write("Current price not available.")
 
-        history = data.get("history", pd.DataFrame())
+        # --- Display current price + change side‑by‑side ---
+        col_price, col_delta = st.columns([2, 1])
+
+        with col_price:
+            if not np.isnan(end_price):
+                st.header(f"Current Price: ${end_price:,.2f}")
+                st.caption(f"Pre‑market: {pre_market_val} | Post‑market: {post_market_val}")
+            else:
+                st.write("Current price not available.")
+
+        with col_delta:
+            if not np.isnan(pts_change):
+                st.metric(
+                    label=f"{timeframe_option} Change",
+                    value=f"{pts_change:+.2f}",
+                    delta=f"{pct_change:+.2f}%"
+                )
+
+        # --- Plot the history ---
         if not history.empty:
             price_fig = plot_price_history(history)
             st.plotly_chart(price_fig)
