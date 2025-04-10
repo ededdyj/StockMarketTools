@@ -301,7 +301,7 @@ elif mode == "Quality vs Value Screener":
     st.markdown("""
     **Quality vs. Value Screener Explanation:**
 
-    This screener ranks S&P 500 stocks based on a composite score derived from:
+    This screener ranks stocks based on a composite score derived from:
 
     - **Value Score:**
       The discount between the fair value (calculated via a simplified DCF model) and the current trading price.
@@ -322,7 +322,7 @@ elif mode == "Quality vs Value Screener":
 
     Stocks with a higher overall score are considered better opportunities from a quality and value perspective.
     """)
-    with st.spinner("Analyzing S&P 500 stocks for quality and value..."):
+    with st.spinner("Analyzing selected/uploaded stocks for quality and value..."):
         qv_df = analyze_quality_value_screener()
     if qv_df is not None and not qv_df.empty:
         # Add ranking columns for each individual score

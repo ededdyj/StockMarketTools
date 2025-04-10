@@ -19,9 +19,9 @@ Quality vs. Value Screener (CSV‑based)
 # 1. CSV paths for each preset universe
 # ---------------------------------------------------------------------------
 CSV_PATHS = {
+    "Dow 30": "data/dow30_tickers.csv",
     "S&P 500": "data/sp500_tickers.csv",
     "NASDAQ‑100": "data/nasdaq100_tickers.csv",
-    "Dow 30": "data/dow30_tickers.csv",
 }
 
 
