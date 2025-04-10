@@ -34,8 +34,8 @@ if mode == "Single Stock Analysis":
 
     # Map timeframe selection to yfinance history parameters
     if timeframe_option == "Intraday (1D)":
-        tf = {"period": "1d", "interval": "1m"}
-        st.info("Intraday (1D) chart displaying minute-level data.")
+        tf = {"period": "1d", "interval": "1m", "prepost": True}
+        st.info("Intraday (1D) chart displaying minute-level data with extended hours enabled.")
     elif timeframe_option == "1 Week":
         start_date = (pd.Timestamp.today() - pd.DateOffset(days=7)).strftime("%Y-%m-%d")
         tf = {"start": start_date, "end": pd.Timestamp.today().strftime("%Y-%m-%d")}
@@ -112,7 +112,6 @@ if mode == "Single Stock Analysis":
         ############# Dividend & Distribution #############
         with st.expander("Dividend & Distribution"):
             dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
-            # Here, dividendYield is assumed to be given as a percent already (e.g., 0.55 means 0.55%)
             dividend_yield = info.get("dividendYield")
             ex_dividend_date = info.get("exDividendDate")
             payout_ratio = info.get("payoutRatio")
@@ -123,7 +122,6 @@ if mode == "Single Stock Analysis":
             else:
                 ex_div_date_str = "N/A"
 
-            # Calculate estimated dividend per year on a $10,000 investment.
             est_dividend = None
             if dividend_yield and current_price and dividend_yield > 0 and current_price > 0:
                 est_dividend = 10000 * (dividend_yield / 100)
@@ -181,7 +179,7 @@ if mode == "Single Stock Analysis":
 
         ############# Price History & Current Price Display #############
         st.subheader(f"Price History ({timeframe_option})")
-        # Display current market prices prominently
+        # Display current, pre-market, and post-market prices
         current_price_val = info.get("currentPrice")
         pre_market_val = info.get("preMarketPrice", "N/A")
         post_market_val = info.get("postMarketPrice", "N/A")
@@ -195,6 +193,13 @@ if mode == "Single Stock Analysis":
         if not history.empty:
             price_fig = plot_price_history(history)
             st.plotly_chart(price_fig)
+
+            # Expander for raw price data debug info
+            with st.expander("Raw Price Data Debug Info"):
+                st.write("### DataFrame Output")
+                st.write(history)
+                st.write("### JSON Output")
+                st.json(history.to_dict())
         else:
             st.write("Historical data not available.")
 
