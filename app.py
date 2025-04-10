@@ -1,3 +1,8 @@
+import yfinance as yf
+
+# Increase the timeout for local requests (if needed)
+yf.shared._requests_kwargs = {"timeout": 60}
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -11,7 +16,7 @@ from analysis.quality_value_screener import analyze_quality_value_screener
 st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
 st.title("Eddy's Stocks - Personal Financial Dashboard")
 
-# Sidebar mode selector
+# Sidebar: Mode selector
 mode = st.sidebar.radio("Select Mode", ["Single Stock Analysis", "SP500 Deals", "Quality vs Value Screener"])
 
 ########################################
@@ -21,13 +26,13 @@ if mode == "Single Stock Analysis":
     st.sidebar.header("Stock Ticker Input")
     ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 
-    # Sidebar for time frame selection
+    # Sidebar: Time frame selection for price history
     timeframe_option = st.sidebar.selectbox(
         "Select Time Frame for Price History",
         ["1 Week", "1 Month", "3 Month", "6 Month", "1 Year", "3 Year", "5 Year", "10 Year"]
     )
 
-    # Map timeframe selection to parameters for yfinance history
+    # Map time frame selection to yfinance history parameters
     if timeframe_option == "1 Week":
         start_date = (pd.Timestamp.today() - pd.DateOffset(days=7)).strftime("%Y-%m-%d")
         tf = {"start": start_date, "end": pd.Timestamp.today().strftime("%Y-%m-%d")}
@@ -48,57 +53,144 @@ if mode == "Single Stock Analysis":
     elif timeframe_option == "10 Year":
         tf = {"period": "10y"}
     else:
-        tf = {"period": "1y"}  # Fallback option
+        tf = {"period": "1y"}  # Fallback
 
     if ticker:
         st.subheader(f"Stock Information: {ticker.upper()}")
         data = get_stock_data(ticker, timeframe=tf)
         info = data.get("info", {})
 
-        # Display basic company info
-        if info:
-            st.write("**Basic Company Info**")
-            st.write(info)
-        else:
-            st.write("No stock information available.")
+        ############# Company Profile #############
+        with st.expander("Company Profile"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Contact Information**")
+                address1 = info.get("address1", "")
+                address2 = info.get("address2", "")
+                address = f"{address1} {address2}".strip()
+                st.write(f"**Address:** {address if address else 'N/A'}")
+                st.write(
+                    f"**City/State/Zip:** {info.get('city', 'N/A')}, {info.get('state', 'N/A')} {info.get('zip', '')}")
+                st.write(f"**Country:** {info.get('country', 'N/A')}")
+                st.write(f"**Phone:** {info.get('phone', 'N/A')}")
+                st.write(f"**Website:** {info.get('website', 'N/A')}")
+            with col2:
+                st.markdown("**Overview**")
+                st.write(f"**Company:** {info.get('longName', 'N/A')}")
+                st.write(f"**Industry:** {info.get('industry', 'N/A')}")
+                st.write(f"**Sector:** {info.get('sector', 'N/A')}")
+                st.write(f"**Employees:** {info.get('fullTimeEmployees', 'N/A')}")
+            st.markdown("**Business Summary:**")
+            st.write(info.get("longBusinessSummary", "N/A"))
 
-        # ---------------------
-        # PRICE HISTORY + METRICS
-        # ---------------------
+        ############# Key Financial Metrics #############
+        with st.expander("Key Financial Metrics"):
+            key_metrics = {
+                "Previous Close": info.get("previousClose"),
+                "Open": info.get("open"),
+                "Day Low": info.get("dayLow"),
+                "Day High": info.get("dayHigh"),
+                "Regular Market Price": info.get("regularMarketPrice"),
+                "Market Cap": info.get("marketCap"),
+                "Volume": info.get("volume"),
+                "Average Volume": info.get("averageVolume"),
+                "52W Low": info.get("fiftyTwoWeekLow"),
+                "52W High": info.get("fiftyTwoWeekHigh"),
+                "Trailing PE": info.get("trailingPE"),
+                "Forward PE": info.get("forwardPE"),
+                "Price to Book": info.get("priceToBook"),
+                "Enterprise Value": info.get("enterpriseValue"),
+                "Profit Margins": info.get("profitMargins"),
+                "Beta": info.get("beta")
+            }
+            df_key = pd.DataFrame(key_metrics.items(), columns=["Metric", "Value"])
+            st.table(df_key)
+
+        ############# Dividend & Distribution #############
+        with st.expander("Dividend & Distribution"):
+            # Here, dividendYield is assumed to be given as a percent already (e.g., 0.55 means 0.55%)
+            dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
+            dividend_yield = info.get("dividendYield")
+            ex_dividend_date = info.get("exDividendDate")
+            payout_ratio = info.get("payoutRatio")
+            current_price = info.get("currentPrice")
+
+            if ex_dividend_date:
+                ex_div_date_str = pd.to_datetime(ex_dividend_date, unit="s").strftime('%Y-%m-%d')
+            else:
+                ex_div_date_str = "N/A"
+
+            # Calculate estimated dividend per year on a $10,000 investment.
+            # Convert dividendYield (already in percent) to a decimal by dividing by 100.
+            est_dividend = None
+            if dividend_yield and current_price and dividend_yield > 0 and current_price > 0:
+                est_dividend = 10000 * (dividend_yield / 100)
+            elif dividend_rate and current_price and current_price > 0:
+                est_dividend = (dividend_rate * 10000) / current_price
+
+            display_yield_pct = f"{dividend_yield:.2f}%" if dividend_yield is not None else "N/A"
+            display_payout_ratio = f"{payout_ratio:.2f}" if payout_ratio is not None and payout_ratio < 10_000 else "N/A"
+
+            dividend_data = {
+                "Dividend Rate ($/share)": f"{dividend_rate:.2f}" if dividend_rate is not None else "N/A",
+                "Dividend Yield (%)": display_yield_pct,
+                "Ex-Dividend Date": ex_div_date_str,
+                "Payout Ratio": display_payout_ratio,
+            }
+            if est_dividend:
+                dividend_data["Est. Dividend per Year on $10,000"] = f"${est_dividend:,.2f}"
+            else:
+                dividend_data["Est. Dividend per Year on $10,000"] = "N/A"
+
+            df_dividend = (
+                pd.DataFrame(dividend_data, index=[0])
+                .T.reset_index()
+                .rename(columns={"index": "Dividend Metric", 0: "Value"})
+            )
+            df_dividend["Value"] = df_dividend["Value"].astype(str)
+            st.table(df_dividend)
+
+        ############# Governance & Management #############
+        with st.expander("Governance & Management"):
+            st.markdown("**Key Company Officers:**")
+            if info.get("companyOfficers"):
+                df_officers = pd.DataFrame(info.get("companyOfficers"))
+                if not df_officers.empty:
+                    cols = ["name", "title", "age", "totalPay"]
+                    df_officers = df_officers[[col for col in cols if col in df_officers.columns]]
+                    st.table(df_officers)
+                else:
+                    st.write("No officer information available.")
+            else:
+                st.write("No company officer information available.")
+
+            st.markdown("**Risk Ratings:**")
+            risk = {
+                "Audit Risk": info.get("auditRisk"),
+                "Board Risk": info.get("boardRisk"),
+                "Compensation Risk": info.get("compensationRisk"),
+                "Shareholder Rights Risk": info.get("shareHolderRightsRisk"),
+                "Overall Risk": info.get("overallRisk")
+            }
+            st.table(pd.DataFrame(risk.items(), columns=["Risk Metric", "Value"]))
+
+            st.markdown("**Investor Relations Website:**")
+            st.write(info.get("irWebsite", "N/A"))
+
+        ############# Price History #############
         st.subheader(f"Price History ({timeframe_option})")
         history = data.get("history", pd.DataFrame())
         if not history.empty:
-            desired_metrics = {
-                "Current Price": info.get("currentPrice"),
-                "Regular Market Price": info.get("regularMarketPrice"),
-                "Pre-Market Price": info.get("preMarketPrice"),
-                "Pre-Market Change": info.get("preMarketChange"),
-                "Pre-Market Change (%)": info.get("preMarketChangePercent"),
-                "Regular Market Change": info.get("regularMarketChange"),
-                "Regular Market Day Range": info.get("regularMarketDayRange"),
-                "Target High Price": info.get("targetHighPrice"),
-                "Target Low Price": info.get("targetLowPrice"),
-                "Target Mean Price": info.get("targetMeanPrice"),
-                "Target Median Price": info.get("targetMedianPrice"),
-            }
-            # Convert values to strings to avoid type conversion issues
-            desired_metrics_str = {k: (str(v) if v is not None else "N/A") for k, v in desired_metrics.items()}
-            df_metrics = pd.DataFrame(desired_metrics_str, index=[0]).T.reset_index()
-            df_metrics.columns = ["Metric", "Value"]
-            st.table(df_metrics)
-
             price_fig = plot_price_history(history)
             st.plotly_chart(price_fig)
         else:
             st.write("Historical data not available.")
 
-        # ---------------------
-        # FREE CASH FLOW CHART
-        # ---------------------
+        ############# Free Cash Flow Chart #############
         st.subheader("Free Cash Flow")
         cashflow = data.get("cashflow", pd.DataFrame())
         if not cashflow.empty:
-            cf_fig = plot_cash_flow = plot_cashflow(cashflow)
+            cf_fig = plot_cashflow(cashflow)
             if cf_fig:
                 st.plotly_chart(cf_fig)
             else:
@@ -106,67 +198,7 @@ if mode == "Single Stock Analysis":
         else:
             st.write("Cash flow data not available.")
 
-        # ---------------------
-        # DIVIDEND SUMMARY SECTION
-        # ---------------------
-        st.subheader("Dividend Summary")
-        # Retrieve dividend-related info
-        dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
-        # Assume dividendYield is given as percent already (e.g., 0.55 means 0.55%)
-        dividend_yield = info.get("dividendYield")
-        ex_dividend_date = info.get("exDividendDate")
-        payout_ratio = info.get("payoutRatio")
-        current_price = info.get("currentPrice")
-
-        # Convert ex-dividend date from Unix timestamp to a readable string
-        if ex_dividend_date:
-            ex_div_date_str = pd.to_datetime(ex_dividend_date, unit="s").strftime('%Y-%m-%d')
-        else:
-            ex_div_date_str = "N/A"
-
-        # Calculate estimated dividend per year on a $10,000 investment.
-        # Since dividend_yield is already in percent, we convert it to decimal by dividing by 100.
-        est_dividend = None
-        if dividend_yield and current_price and dividend_yield > 0 and current_price > 0:
-            est_dividend = 10000 * (dividend_yield / 100)
-        elif dividend_rate and current_price and current_price > 0:
-            # Fallback: approximate yield using dividend_rate divided by current price.
-            est_dividend = (dividend_rate * 10000) / current_price
-
-        # Prepare display values. Since the yield is in percent already, simply format it.
-        if dividend_yield and dividend_yield > 0:
-            display_yield_pct = f"{dividend_yield:.2f}%"
-        else:
-            display_yield_pct = "N/A"
-
-        if payout_ratio and payout_ratio < 10_000:
-            display_payout_ratio = f"{payout_ratio:.2f}"
-        else:
-            display_payout_ratio = "N/A"
-
-        dividend_data = {
-            "Dividend Rate ($/share)": f"{dividend_rate:.2f}" if dividend_rate is not None else "N/A",
-            "Dividend Yield (%)": display_yield_pct,
-            "Ex-Dividend Date": ex_div_date_str,
-            "Payout Ratio": display_payout_ratio,
-        }
-        if est_dividend:
-            dividend_data["Est. Dividend per Year on $10,000"] = f"${est_dividend:,.2f}"
-        else:
-            dividend_data["Est. Dividend per Year on $10,000"] = "N/A"
-
-        # Convert all values to strings to avoid Arrow serialization errors.
-        df_dividend = (
-            pd.DataFrame(dividend_data, index=[0])
-            .T.reset_index()
-            .rename(columns={"index": "Dividend Metric", 0: "Value"})
-        )
-        df_dividend["Value"] = df_dividend["Value"].astype(str)
-        st.table(df_dividend)
-
-        # ---------------------
-        # FAIR VALUE (DCF MODEL) + CONFIDENCE INTERVAL SECTION
-        # ---------------------
+        ############# Fair Value Calculation #############
         st.subheader("Fair Value Calculation (DCF Model)")
         shares_outstanding = info.get("sharesOutstanding", None)
         if shares_outstanding and not cashflow.empty:
@@ -183,6 +215,10 @@ if mode == "Single Stock Analysis":
                 st.write("Fair Value calculation could not be completed due to missing data.")
         else:
             st.write("Insufficient data to calculate Fair Value.")
+
+        ############# Raw Data #############
+        with st.expander("Raw Data"):
+            st.json(info)
 
 ########################################
 # SP500 DEALS MODE
