@@ -1,6 +1,6 @@
 import yfinance as yf
 
-# Increase the timeout for local requests (if needed)
+# Increase request timeout (adjust as needed)
 yf.shared._requests_kwargs = {"timeout": 60}
 
 import streamlit as st
@@ -26,14 +26,17 @@ if mode == "Single Stock Analysis":
     st.sidebar.header("Stock Ticker Input")
     ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 
-    # Sidebar: Time frame selection for price history
+    # Add "Intraday (1D)" option along with other time frames
     timeframe_option = st.sidebar.selectbox(
         "Select Time Frame for Price History",
-        ["1 Week", "1 Month", "3 Month", "6 Month", "1 Year", "3 Year", "5 Year", "10 Year"]
+        ["Intraday (1D)", "1 Week", "1 Month", "3 Month", "6 Month", "1 Year", "3 Year", "5 Year", "10 Year"]
     )
 
-    # Map time frame selection to yfinance history parameters
-    if timeframe_option == "1 Week":
+    # Map timeframe selection to yfinance history parameters
+    if timeframe_option == "Intraday (1D)":
+        tf = {"period": "1d", "interval": "1m"}
+        st.info("Intraday (1D) chart displaying minute-level data.")
+    elif timeframe_option == "1 Week":
         start_date = (pd.Timestamp.today() - pd.DateOffset(days=7)).strftime("%Y-%m-%d")
         tf = {"start": start_date, "end": pd.Timestamp.today().strftime("%Y-%m-%d")}
         st.info("Note: The 1 Week chart displays only trading days (weekends and holidays are excluded).")
@@ -53,7 +56,7 @@ if mode == "Single Stock Analysis":
     elif timeframe_option == "10 Year":
         tf = {"period": "10y"}
     else:
-        tf = {"period": "1y"}  # Fallback
+        tf = {"period": "1y"}  # Fallback option
 
     if ticker:
         st.subheader(f"Stock Information: {ticker.upper()}")
@@ -108,8 +111,8 @@ if mode == "Single Stock Analysis":
 
         ############# Dividend & Distribution #############
         with st.expander("Dividend & Distribution"):
-            # Here, dividendYield is assumed to be given as a percent already (e.g., 0.55 means 0.55%)
             dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
+            # Here, dividendYield is assumed to be given as a percent already (e.g., 0.55 means 0.55%)
             dividend_yield = info.get("dividendYield")
             ex_dividend_date = info.get("exDividendDate")
             payout_ratio = info.get("payoutRatio")
@@ -121,7 +124,6 @@ if mode == "Single Stock Analysis":
                 ex_div_date_str = "N/A"
 
             # Calculate estimated dividend per year on a $10,000 investment.
-            # Convert dividendYield (already in percent) to a decimal by dividing by 100.
             est_dividend = None
             if dividend_yield and current_price and dividend_yield > 0 and current_price > 0:
                 est_dividend = 10000 * (dividend_yield / 100)
@@ -177,8 +179,18 @@ if mode == "Single Stock Analysis":
             st.markdown("**Investor Relations Website:**")
             st.write(info.get("irWebsite", "N/A"))
 
-        ############# Price History #############
+        ############# Price History & Current Price Display #############
         st.subheader(f"Price History ({timeframe_option})")
+        # Display current market prices prominently
+        current_price_val = info.get("currentPrice")
+        pre_market_val = info.get("preMarketPrice", "N/A")
+        post_market_val = info.get("postMarketPrice", "N/A")
+        if current_price_val is not None:
+            st.header(f"Current Price: ${current_price_val}")
+            st.caption(f"Pre-market: ${pre_market_val} | Post-market: ${post_market_val}")
+        else:
+            st.write("Current price not available.")
+
         history = data.get("history", pd.DataFrame())
         if not history.empty:
             price_fig = plot_price_history(history)
