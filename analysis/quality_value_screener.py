@@ -1,35 +1,55 @@
-import pandas as pd
-import yfinance as yf
-import streamlit as st
+import os
 from typing import List
+
+import pandas as pd
+import streamlit as st
+import yfinance as yf
+
 from models.valuation import calculate_fair_value
 
 """
-Quality vs. Value Screener (CSV‑based)
-=====================================
+Quality vs. Value Screener (CSV‑based, auto‑discover)
+=====================================================
 
-* Lets the user pick **S&P 500, NASDAQ‑100, or Dow 30** from a sidebar
-  select‑box **or** upload their own CSV of tickers.
-* Ticker lists are loaded from local CSV files that live in `data/`.
-* No dynamic scraping or ETF look‑ups – fully offline except for the
-  yfinance data pulls per ticker.
+* Scans the **data/** folder for any file whose name ends with
+  `_tickers.csv` and turns each into a selectable universe (e.g.
+  `sp500_tickers.csv` → “Sp500”).
+* Sidebar lets the user choose one of those universes **or** upload their
+  own CSV; an uploaded file overrides the preset list.
+* Pulls fundamental data with *yfinance*, ranks stocks by a composite
+  score, and returns a `pandas.DataFrame` for display.
+* No dynamic scraping of index constituents—everything is offline except
+  the per‑ticker yfinance calls.
 """
 
 # ---------------------------------------------------------------------------
-# 1. CSV paths for each preset universe
+# 1. Discover available CSV lists at startup
 # ---------------------------------------------------------------------------
-CSV_PATHS = {
-    "S&P 500": "data/sp500_tickers.csv",
-    "NASDAQ‑100": "data/nasdaq100_tickers.csv",
-    "Dow 30": "data/dow30_tickers.csv",
-}
 
+def _discover_csv_paths(folder: str = "data") -> dict[str, str]:
+    """Return a mapping {Pretty Name → full path} for every *_tickers.csv
+    found in *folder*."""
+    paths: dict[str, str] = {}
+    if os.path.isdir(folder):
+        for fname in os.listdir(folder):
+            if fname.lower().endswith("_tickers.csv"):
+                key = fname[:-12]  # strip _tickers.csv
+                key = key.replace("_", " ").replace("-", " ").title()
+                paths[key] = os.path.join(folder, fname)
+    return paths
+
+CSV_PATHS = _discover_csv_paths()
+
+# ---------------------------------------------------------------------------
+# 2. Ticker‑list loader
+# ---------------------------------------------------------------------------
 
 @st.cache_data(show_spinner=False)
 def _load_tickers_from_csv(path: str) -> List[str]:
-    """Return a list of unique tickers from the given CSV file."""
+    """Read *path* and return a list of unique tickers.
+    Accepts common column names (Symbol/Ticker) or falls back to the first
+    column."""
     df = pd.read_csv(path)
-    # Try common column names, else first column
     for col in ["Symbol", "Ticker", "symbol", "ticker"]:
         if col in df.columns:
             return df[col].dropna().unique().tolist()
@@ -38,9 +58,9 @@ def _load_tickers_from_csv(path: str) -> List[str]:
 
 @st.cache_data(show_spinner=False)
 def get_tickers(universe: str, uploaded_file=None) -> List[str]:
-    """Return ticker list based on user choice or uploaded CSV."""
+    """Return the ticker list based on *universe* or an uploaded CSV."""
 
-    #  Uploaded CSV overrides preset lists
+    # 1️⃣  Uploaded CSV overrides preset lists
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
@@ -49,7 +69,7 @@ def get_tickers(universe: str, uploaded_file=None) -> List[str]:
             st.error(f"Could not read uploaded file: {e}")
             return []
 
-    #  Preset CSV based on universe
+    # 2️⃣  Preset CSV based on universe
     csv_path = CSV_PATHS.get(universe)
     if not csv_path:
         st.error(f"Unknown universe: {universe}")
@@ -60,9 +80,8 @@ def get_tickers(universe: str, uploaded_file=None) -> List[str]:
         st.error(f"Error loading {universe} tickers: {e}")
         return []
 
-
 # ---------------------------------------------------------------------------
-# 2. Main Streamlit entry point
+# 3. Main Streamlit entry point
 # ---------------------------------------------------------------------------
 
 def analyze_quality_value_screener():
@@ -71,7 +90,12 @@ def analyze_quality_value_screener():
     # ── Sidebar UI ──────────────────────────────────────────────────────
     st.sidebar.subheader("Universe")
     options = list(CSV_PATHS.keys())
-    universe = st.sidebar.selectbox("Choose a list of tickers", options, index=options.index("Dow 30"))
+    if not options:
+        st.error("No *_tickers.csv files found in the data/ folder.")
+        return None
+
+    default_index = options.index("Dow 30") if "Dow 30" in options else 0
+    universe = st.sidebar.selectbox("Choose a list of tickers", options, index=default_index)
     uploaded_file = st.sidebar.file_uploader("…or upload a CSV with tickers", type="csv")
 
     tickers = get_tickers(universe, uploaded_file)
@@ -100,12 +124,12 @@ def analyze_quality_value_screener():
             if fair_value is None:
                 continue
 
-            # Value score (positive only if undervalued)
-            if fair_value and fair_value > 0:
-                discount_pct = ((fair_value - current_price) / current_price) * 100 if current_price else 0
+            # Value score only meaningful when fair_value > 0
+            if fair_value > 0:
+                discount_pct = ((fair_value - current_price) / current_price) * 100 if current_price else None
                 value_score = max((fair_value - current_price) / fair_value, 0)
             else:
-                discount_pct = None  # indicates fair value not meaningful
+                discount_pct = None
                 value_score = 0
 
             # Raw metrics --------------------------------------------------
