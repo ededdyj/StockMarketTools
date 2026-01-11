@@ -6,286 +6,470 @@ yf.shared._requests_kwargs = {"timeout": 60}
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from typing import Dict, List, Tuple
 
 from data.fetcher import get_stock_data
 from models.valuation import calculate_fair_value, calculate_fair_value_range
 from utils.charts import plot_price_history, plot_cashflow
 from analysis.sp500_deals import analyze_sp500_deals
 from analysis.quality_value_screener import analyze_quality_value_screener
+from config.philosophies import get_philosophy_options, get_philosophy
 
 st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
 st.title("Eddy's Stocks - Personal Financial Dashboard")
 
-# Sidebar: Mode selector
-mode = st.sidebar.radio("Select Mode", ["Single Stock Analysis", "SP500 Deals", "Quality vs Value Screener"])
 
-########################################
-# SINGLE STOCK ANALYSIS MODE
-########################################
-if mode == "Single Stock Analysis":
-    st.sidebar.header("Stock Ticker Input")
-    ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
+MODE_DESCRIPTIONS: Dict[str, str] = {
+    "Single Stock Analysis": "Deep dive on one ticker with metrics, cash flow, and valuation.",
+    "SP500 Deals": "Run a batch DCF to surface S&P 500 names trading below intrinsic value.",
+    "Quality vs Value Screener": "Rank a universe by composite quality, growth, stability, and value scores.",
+}
 
-    # Add "Intraday (1D)" option along with other time frames
-    timeframe_option = st.sidebar.selectbox(
-        "Select Time Frame for Price History",
-        ["Intraday (1D)", "1 Week", "1 Month", "3 Month", "6 Month", "1 Year", "3 Year", "5 Year", "10 Year"]
+DEFAULT_TICKERS: Dict[str, str] = {
+    "Long-term Value/DCF": "AAPL",
+    "Dividend/Income": "KO",
+    "Growth-at-a-Reasonable-Price": "MSFT",
+    "Momentum/Trend": "NVDA",
+    "Index/Passive": "VOO",
+}
+
+TIMEFRAME_CHOICES: List[str] = [
+    "Intraday (1D)",
+    "1 Week",
+    "1 Month",
+    "3 Month",
+    "6 Month",
+    "1 Year",
+    "3 Year",
+    "5 Year",
+    "10 Year",
+]
+
+PHILOSOPHY_TIMEFRAME_DEFAULTS: Dict[str, str] = {
+    "Momentum/Trend": "3 Month",
+    "Dividend/Income": "1 Year",
+    "Index/Passive": "3 Year",
+}
+
+
+def _is_nan(value) -> bool:
+    try:
+        return np.isnan(value)
+    except TypeError:
+        return False
+
+
+def format_currency(value, precision: int = 2) -> str:
+    if value is None or _is_nan(value):
+        return "N/A"
+    return f"${float(value):,.{precision}f}"
+
+
+def format_percent(value, precision: int = 2) -> str:
+    if value is None or _is_nan(value):
+        return "N/A"
+    return f"{value * 100:.{precision}f}%"
+
+
+def format_ratio(value, precision: int = 2) -> str:
+    if value is None or _is_nan(value):
+        return "N/A"
+    return f"{float(value):,.{precision}f}"
+
+
+def format_int(value) -> str:
+    if value is None or _is_nan(value):
+        return "N/A"
+    return f"{int(value):,}"
+
+
+def resolve_timeframe(option: str) -> Tuple[Dict, str, str]:
+    """Return yfinance history kwargs, note, and label for the UI."""
+
+    now = pd.Timestamp.utcnow()
+    today_str = now.strftime("%Y-%m-%d")
+    if option == "Intraday (1D)":
+        return (
+            {"period": "1d", "interval": "1m", "prepost": False},
+            "Displays 1-minute ticks for the current regular session.",
+            "1 trading day",
+        )
+    if option == "1 Week":
+        start_date = (now - pd.DateOffset(days=7)).strftime("%Y-%m-%d")
+        return (
+            {"start": start_date, "end": today_str},
+            "Shows the last five trading days; weekends and holidays are skipped.",
+            "1 week (close-to-close)",
+        )
+    if option == "1 Month":
+        return (
+            {"period": "1mo"},
+            "Based on the most recent month of trading data.",
+            "1 month",
+        )
+    if option == "3 Month":
+        return (
+            {"period": "3mo"},
+            "Captures the last quarter of trading activity.",
+            "3 months",
+        )
+    if option == "6 Month":
+        return (
+            {"period": "6mo"},
+            "Highlights the mid-term trend over six months.",
+            "6 months",
+        )
+    if option == "1 Year":
+        return (
+            {"period": "1y"},
+            "Represents the trailing twelve months.",
+            "1 year",
+        )
+    if option == "3 Year":
+        start_date = (now - pd.DateOffset(years=3)).strftime("%Y-%m-%d")
+        return (
+            {"start": start_date, "end": today_str},
+            "Pulled from daily closes over the last three calendar years.",
+            "3 years",
+        )
+    if option == "5 Year":
+        return (
+            {"period": "5y"},
+            "Long-term performance spanning five years.",
+            "5 years",
+        )
+    if option == "10 Year":
+        return (
+            {"period": "10y"},
+            "Decade-long history with monthly sampling when needed.",
+            "10 years",
+        )
+    return (
+        {"period": "1y"},
+        "Fallback to trailing twelve months.",
+        "1 year",
     )
 
-    # Map timeframe selection to yfinance history parameters
-    if timeframe_option == "Intraday (1D)":
-        # Use 1D period and 1-minute interval for intraday data (regular hours)
-        tf = {"period": "1d", "interval": "1m", "prepost": False}
-        st.info("Intraday (1D) chart displaying 1-minute data for regular market hours.")
-    elif timeframe_option == "1 Week":
-        start_date = (pd.Timestamp.today() - pd.DateOffset(days=7)).strftime("%Y-%m-%d")
-        tf = {"start": start_date, "end": pd.Timestamp.today().strftime("%Y-%m-%d")}
-        st.info("Note: The 1 Week chart displays only trading days (weekends and holidays are excluded).")
-    elif timeframe_option == "1 Month":
-        tf = {"period": "1mo"}
-    elif timeframe_option == "3 Month":
-        tf = {"period": "3mo"}
-    elif timeframe_option == "6 Month":
-        tf = {"period": "6mo"}
-    elif timeframe_option == "1 Year":
-        tf = {"period": "1y"}
-    elif timeframe_option == "3 Year":
-        start_date = (pd.Timestamp.today() - pd.DateOffset(years=3)).strftime("%Y-%m-%d")
-        tf = {"start": start_date, "end": pd.Timestamp.today().strftime("%Y-%m-%d")}
-    elif timeframe_option == "5 Year":
-        tf = {"period": "5y"}
-    elif timeframe_option == "10 Year":
-        tf = {"period": "10y"}
-    else:
-        tf = {"period": "1y"}  # Fallback option
 
-    if ticker:
-        st.subheader(f"Stock Information: {ticker.upper()}")
-        data = get_stock_data(ticker, timeframe=tf)
-        info = data.get("info", {})
+@st.cache_data(show_spinner=False, ttl=900)
+def load_stock_bundle(ticker: str, timeframe_option: str) -> Dict:
+    timeframe_kwargs, _, _ = resolve_timeframe(timeframe_option)
+    return get_stock_data(ticker, timeframe=timeframe_kwargs)
 
-        ############# Company Profile #############
-        with st.expander("Company Profile"):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Contact Information**")
-                address1 = info.get("address1", "")
-                address2 = info.get("address2", "")
-                address = f"{address1} {address2}".strip()
-                st.write(f"**Address:** {address if address else 'N/A'}")
-                st.write(
-                    f"**City/State/Zip:** {info.get('city', 'N/A')}, {info.get('state', 'N/A')} {info.get('zip', '')}")
-                st.write(f"**Country:** {info.get('country', 'N/A')}")
-                st.write(f"**Phone:** {info.get('phone', 'N/A')}")
-                st.write(f"**Website:** {info.get('website', 'N/A')}")
-            with col2:
-                st.markdown("**Overview**")
-                st.write(f"**Company:** {info.get('longName', 'N/A')}")
-                st.write(f"**Industry:** {info.get('industry', 'N/A')}")
-                st.write(f"**Sector:** {info.get('sector', 'N/A')}")
-                st.write(f"**Employees:** {info.get('fullTimeEmployees', 'N/A')}")
-            st.markdown("**Business Summary:**")
-            st.write(info.get("longBusinessSummary", "N/A"))
 
-        ############# Key Financial Metrics #############
-        with st.expander("Key Financial Metrics"):
-            key_metrics = {
-                "Previous Close": info.get("previousClose"),
-                "Open": info.get("open"),
-                "Day Low": info.get("dayLow"),
-                "Day High": info.get("dayHigh"),
-                "Regular Market Price": info.get("regularMarketPrice"),
-                "Market Cap": info.get("marketCap"),
-                "Volume": info.get("volume"),
-                "Average Volume": info.get("averageVolume"),
-                "52W Low": info.get("fiftyTwoWeekLow"),
-                "52W High": info.get("fiftyTwoWeekHigh"),
-                "Trailing PE": info.get("trailingPE"),
-                "Forward PE": info.get("forwardPE"),
-                "Price to Book": info.get("priceToBook"),
-                "Enterprise Value": info.get("enterpriseValue"),
-                "Profit Margins": info.get("profitMargins"),
-                "Beta": info.get("beta")
-            }
-            df_key = pd.DataFrame(key_metrics.items(), columns=["Metric", "Value"])
-            st.table(df_key)
+def order_modes(philosophy_name: str) -> List[str]:
+    philosophy = get_philosophy(philosophy_name)
+    preferred = [mode for mode in MODE_DESCRIPTIONS if mode in philosophy.tools]
+    remaining = [mode for mode in MODE_DESCRIPTIONS if mode not in preferred]
+    return preferred + remaining if preferred else list(MODE_DESCRIPTIONS.keys())
 
-        ############# Dividend & Distribution #############
-        with st.expander("Dividend & Distribution"):
-            dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
-            dividend_yield = info.get("dividendYield")  # already in percent (e.g., 0.55 means 0.55%)
-            ex_dividend_date = info.get("exDividendDate")
-            payout_ratio = info.get("payoutRatio")
-            current_price = info.get("currentPrice")
 
-            if ex_dividend_date:
-                ex_div_date_str = pd.to_datetime(ex_dividend_date, unit="s").strftime('%Y-%m-%d')
-            else:
-                ex_div_date_str = "N/A"
+def format_assumption_value(value) -> str:
+    if isinstance(value, (int, float)) and value != 0 and abs(value) < 1:
+        return f"{value * 100:.2f}%"
+    return f"{value}"
 
-            est_dividend = None
-            if dividend_yield and current_price and dividend_yield > 0 and current_price > 0:
-                est_dividend = 10000 * (dividend_yield / 100)
-            elif dividend_rate and current_price and current_price > 0:
-                est_dividend = (dividend_rate * 10000) / current_price
 
-            display_yield_pct = f"{dividend_yield:.2f}%" if dividend_yield is not None else "N/A"
-            display_payout_ratio = f"{payout_ratio:.2f}" if payout_ratio is not None and payout_ratio < 10_000 else "N/A"
+def render_philosophy_summary(philosophy):
+    st.markdown(f"### Investment Philosophy: {philosophy.name}")
+    st.write(philosophy.description)
 
-            dividend_data = {
-                "Dividend Rate ($/share)": f"{dividend_rate:.2f}" if dividend_rate is not None else "N/A",
-                "Dividend Yield (%)": display_yield_pct,
-                "Ex-Dividend Date": ex_div_date_str,
-                "Payout Ratio": display_payout_ratio,
-            }
-            if est_dividend:
-                dividend_data["Est. Dividend per Year on $10,000"] = f"${est_dividend:,.2f}"
-            else:
-                dividend_data["Est. Dividend per Year on $10,000"] = "N/A"
-
-            df_dividend = (
-                pd.DataFrame(dividend_data, index=[0])
-                .T.reset_index()
-                .rename(columns={"index": "Dividend Metric", 0: "Value"})
+    col_metrics, col_assumptions = st.columns([2, 1])
+    with col_metrics:
+        st.markdown("**Key Metrics Monitored**")
+        st.markdown("\n".join([f"- {metric}" for metric in philosophy.key_metrics]))
+    with col_assumptions:
+        if philosophy.default_assumptions:
+            assumption_df = pd.DataFrame(
+                [
+                    {
+                        "Assumption": key.replace("_", " ").title(),
+                        "Default": format_assumption_value(value),
+                    }
+                    for key, value in philosophy.default_assumptions.items()
+                ]
             )
-            df_dividend["Value"] = df_dividend["Value"].astype(str)
-            st.table(df_dividend)
+            st.markdown("**Default Assumptions**")
+            st.table(assumption_df)
 
-        ############# Governance & Management #############
-        with st.expander("Governance & Management"):
-            st.markdown("**Key Company Officers:**")
-            if info.get("companyOfficers"):
-                df_officers = pd.DataFrame(info.get("companyOfficers"))
-                if not df_officers.empty:
-                    cols = ["name", "title", "age", "totalPay"]
-                    df_officers = df_officers[[col for col in cols if col in df_officers.columns]]
-                    st.table(df_officers)
-                else:
-                    st.write("No officer information available.")
-            else:
-                st.write("No company officer information available.")
-            st.markdown("**Risk Ratings:**")
-            risk = {
-                "Audit Risk": info.get("auditRisk"),
-                "Board Risk": info.get("boardRisk"),
-                "Compensation Risk": info.get("compensationRisk"),
-                "Shareholder Rights Risk": info.get("shareHolderRightsRisk"),
-                "Overall Risk": info.get("overallRisk")
-            }
-            st.table(pd.DataFrame(risk.items(), columns=["Risk Metric", "Value"]))
-            st.markdown("**Investor Relations Website:**")
-            st.write(info.get("irWebsite", "N/A"))
+    st.info(
+        f"Tools best suited for this philosophy: {', '.join(philosophy.tools)}."
+        " Use these modules to stress-test the underlying thesis."
+    )
 
-        ############# Price History, Current Price & Time‑frame Performance #############
-        st.subheader(f"Price History ({timeframe_option})")
+    if philosophy.warnings:
+        st.warning("\n".join([f"⚠️ {warning}" for warning in philosophy.warnings]))
+    if philosophy.limitations:
+        st.caption("\n".join([f"Limit: {limit}" for limit in philosophy.limitations]))
 
-        # --- Retrieve history first so we can compute the change ---
-        history = data.get("history", pd.DataFrame())
 
-        if not history.empty:
-            start_price = history["Close"].iloc[0]
-            end_price = history["Close"].iloc[-1]
-            pts_change = end_price - start_price
-            pct_change = (pts_change / start_price) * 100 if start_price else np.nan
+def render_company_profile(info: Dict):
+    with st.expander("Company Profile"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Contact Information**")
+            address = " ".join(filter(None, [info.get("address1"), info.get("address2")])).strip()
+            st.write(f"**Address:** {address if address else 'N/A'}")
+            st.write(
+                f"**City/State/Zip:** {info.get('city', 'N/A')}, {info.get('state', 'N/A')} {info.get('zip', '')}"
+            )
+            st.write(f"**Country:** {info.get('country', 'N/A')}")
+            st.write(f"**Phone:** {info.get('phone', 'N/A')}")
+            st.write(f"**Website:** {info.get('website', 'N/A')}")
+        with col2:
+            st.markdown("**Overview**")
+            st.write(f"**Company:** {info.get('longName', 'N/A')}")
+            st.write(f"**Industry:** {info.get('industry', 'N/A')}")
+            st.write(f"**Sector:** {info.get('sector', 'N/A')}")
+            st.write(f"**Employees:** {format_int(info.get('fullTimeEmployees'))}")
+        st.markdown("**Business Summary:**")
+        st.write(info.get("longBusinessSummary", "N/A"))
+
+
+def render_key_financial_metrics(info: Dict):
+    with st.expander("Key Financial Metrics"):
+        rows = [
+            ("Previous Close", format_currency(info.get("previousClose")), "USD/share, prior close"),
+            ("Open", format_currency(info.get("open")), "USD/share, latest session"),
+            ("Day Low", format_currency(info.get("dayLow")), "USD/share, latest session"),
+            ("Day High", format_currency(info.get("dayHigh")), "USD/share, latest session"),
+            (
+                "Regular Market Price",
+                format_currency(info.get("regularMarketPrice")),
+                "USD/share, delayed quote",
+            ),
+            ("Market Cap", format_currency(info.get("marketCap"), 0), "USD, latest close"),
+            ("Enterprise Value", format_currency(info.get("enterpriseValue"), 0), "USD, includes debt"),
+            ("Volume", format_int(info.get("volume")), "Shares traded today"),
+            (
+                "Average Volume",
+                format_int(info.get("averageVolume")),
+                "Shares/day (3M avg)",
+            ),
+            ("52W Low", format_currency(info.get("fiftyTwoWeekLow")), "USD/share, trailing 12M"),
+            ("52W High", format_currency(info.get("fiftyTwoWeekHigh")), "USD/share, trailing 12M"),
+            ("Trailing PE", format_ratio(info.get("trailingPE")), "x earnings"),
+            ("Forward PE", format_ratio(info.get("forwardPE")), "x next FY earnings"),
+            ("Price to Book", format_ratio(info.get("priceToBook")), "x"),
+            ("Profit Margins", format_percent(info.get("profitMargins")), "Net margin (ttm)"),
+            ("Beta", format_ratio(info.get("beta"), 2), "vs. S&P 500 (2Y)"),
+        ]
+        df_key = pd.DataFrame(rows, columns=["Metric", "Value", "Units/Context"])
+        st.table(df_key)
+
+
+def render_dividend_section(info: Dict, philosophy_name: str):
+    with st.expander("Dividend & Distribution"):
+        dividend_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
+        dividend_yield = info.get("dividendYield")
+        payout_ratio = info.get("payoutRatio")
+        ex_dividend_date = info.get("exDividendDate")
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+
+        if ex_dividend_date:
+            ex_dividend_str = pd.to_datetime(ex_dividend_date, unit="s").strftime("%Y-%m-%d")
         else:
-            end_price = info.get("currentPrice", np.nan)
-            pts_change = pct_change = np.nan
+            ex_dividend_str = "N/A"
 
-        pre_market_val = info.get("preMarketPrice", "N/A")
-        post_market_val = info.get("postMarketPrice", "N/A")
+        est_dividend = None
+        if dividend_yield and current_price:
+            est_dividend = 10_000 * dividend_yield / current_price
+        elif dividend_rate and current_price:
+            est_dividend = (dividend_rate * 10_000) / current_price
 
-        # --- Display current price + change side‑by‑side ---
-        col_price, col_delta = st.columns([2, 1])
+        dividend_rows = [
+            ("Dividend Rate", format_currency(dividend_rate), "USD/share (ttm)"),
+            ("Dividend Yield", format_percent(dividend_yield), "Forward yield"),
+            ("Payout Ratio", format_percent(payout_ratio), "FCF or earnings-based"),
+            ("Ex-Dividend Date", ex_dividend_str, "Next eligible record date"),
+            (
+                "Est. Dividend on $10k",
+                format_currency(est_dividend),
+                "Annualized using yield inputs",
+            ),
+        ]
+        df_dividend = pd.DataFrame(dividend_rows, columns=["Dividend Metric", "Value", "Units/Notes"])
+        st.table(df_dividend)
+        if "Dividend" in philosophy_name:
+            st.info("Yield targets and payout safety drive this philosophy; validate dividend histories externally.")
 
-        with col_price:
-            if not np.isnan(end_price):
-                st.header(f"Current Price: ${end_price:,.2f}")
-                st.caption(f"Pre‑market: {pre_market_val} | Post‑market: {post_market_val}")
-            else:
-                st.write("Current price not available.")
 
-        with col_delta:
-            if not np.isnan(pts_change):
-                st.metric(
-                    label=f"{timeframe_option} Change",
-                    value=f"{pts_change:+.2f}",
-                    delta=f"{pct_change:+.2f}%"
-                )
-
-        # --- Plot the history ---
-        if not history.empty:
-            price_fig = plot_price_history(history)
-            st.plotly_chart(price_fig)
-            with st.expander("Raw Price Data Debug Info"):
-                st.write("### DataFrame Output")
-                st.write(history)
+def render_governance_section(info: Dict):
+    with st.expander("Governance & Management"):
+        st.markdown("**Key Company Officers:**")
+        officers = info.get("companyOfficers")
+        if officers:
+            df_officers = pd.DataFrame(officers)
+            cols = ["name", "title", "age", "totalPay"]
+            df_officers = df_officers[[col for col in cols if col in df_officers.columns]]
+            st.table(df_officers)
         else:
-            st.write("Historical data not available.")
+            st.write("No officer information available.")
 
-        ############# Free Cash Flow Chart #############
-        st.subheader("Free Cash Flow")
-        cashflow = data.get("cashflow", pd.DataFrame())
-        if not cashflow.empty:
-            cf_fig = plot_cashflow(cashflow)
-            if cf_fig:
-                st.plotly_chart(cf_fig)
-            else:
-                st.write("Free Cash Flow data not available.")
-        else:
-            st.write("Cash flow data not available.")
+        st.markdown("**Risk Ratings:**")
+        risk = {
+            "Audit Risk": info.get("auditRisk"),
+            "Board Risk": info.get("boardRisk"),
+            "Compensation Risk": info.get("compensationRisk"),
+            "Shareholder Rights Risk": info.get("shareHolderRightsRisk"),
+            "Overall Risk": info.get("overallRisk"),
+        }
+        risk_df = pd.DataFrame(
+            [(metric, format_ratio(value, 0)) for metric, value in risk.items()],
+            columns=["Risk Metric", "Score (0-10)"]
+        )
+        st.table(risk_df)
+        st.markdown("**Investor Relations Website:**")
+        st.write(info.get("irWebsite", "N/A"))
 
-        ############# Fair Value Calculation #############
-        st.subheader("Fair Value Calculation (DCF Model)")
-        shares_outstanding = info.get("sharesOutstanding", None)
-        if shares_outstanding and not cashflow.empty:
-            base_fair_value = calculate_fair_value(cashflow, shares_outstanding)
-            fair_value_range = calculate_fair_value_range(cashflow, shares_outstanding)
-            if base_fair_value:
-                st.write(f"Calculated Fair Value (Enterprise Value per Share): **${base_fair_value:,.2f}**")
-                if fair_value_range is not None:
-                    st.write(
-                        f"Fair Value Confidence Interval: **${fair_value_range[0]:,.2f}** - **${fair_value_range[1]:,.2f}**")
-                else:
-                    st.write("Fair Value confidence interval could not be calculated due to missing data.")
-            else:
-                st.write("Fair Value calculation could not be completed due to missing data.")
-        else:
-            st.write("Insufficient data to calculate Fair Value.")
 
-        ############# Raw Data #############
-        with st.expander("Raw Data"):
-            st.json(info)
+def render_price_section(history: pd.DataFrame, info: Dict, timeframe_option: str, timeframe_note: str):
+    st.subheader(f"Price History ({timeframe_option})")
+    st.caption(timeframe_note)
 
-########################################
-# SP500 DEALS MODE
-########################################
-elif mode == "SP500 Deals":
-    st.subheader("S&P 500 Deals Analysis")
+    if history is None or history.empty:
+        st.write("Historical data not available.")
+        return
+
+    start_price = history["Close"].iloc[0]
+    end_price = history["Close"].iloc[-1]
+    pts_change = end_price - start_price
+    pct_change = (pts_change / start_price) * 100 if start_price else np.nan
+
+    pre_market_val = info.get("preMarketPrice")
+    post_market_val = info.get("postMarketPrice")
+
+    col_price, col_delta = st.columns([2, 1])
+    with col_price:
+        st.header(f"Current Price: {format_currency(end_price)}")
+        st.caption(
+            f"Pre-market: {format_currency(pre_market_val)} | Post-market: {format_currency(post_market_val)}"
+        )
+    with col_delta:
+        st.metric(
+            label=f"{timeframe_option} change (close-to-close)",
+            value=f"{pts_change:+.2f} USD" if not _is_nan(pts_change) else "N/A",
+            delta=f"{pct_change:+.2f}%" if not _is_nan(pct_change) else "N/A",
+        )
+
+    price_fig = plot_price_history(history)
+    st.plotly_chart(price_fig, use_container_width=True)
+
+
+def render_cashflow_section(cashflow: pd.DataFrame):
+    st.subheader("Free Cash Flow")
+    if cashflow is None or cashflow.empty:
+        st.write("Cash flow data not available.")
+        return
+    cf_fig = plot_cashflow(cashflow)
+    if cf_fig:
+        st.plotly_chart(cf_fig, use_container_width=True)
+    else:
+        st.write("Free Cash Flow data not available.")
+
+
+def render_dcf_section(info: Dict, cashflow: pd.DataFrame, philosophy):
+    st.subheader("Intrinsic Value (DCF Model)")
+    shares_outstanding = info.get("sharesOutstanding")
+    if not shares_outstanding or cashflow is None or cashflow.empty:
+        st.write("Insufficient data to calculate fair value.")
+        return
+
+    discount_rate = philosophy.default_assumptions.get("discount_rate", 0.10)
+    growth_rate = philosophy.default_assumptions.get("growth_rate", 0.03)
+    terminal_growth_rate = philosophy.default_assumptions.get("terminal_growth_rate", 0.02)
+    projection_years = philosophy.default_assumptions.get("projection_years", 5)
+
+    base_fair_value = calculate_fair_value(
+        cashflow,
+        shares_outstanding,
+        discount_rate=discount_rate,
+        growth_rate=growth_rate,
+        terminal_growth_rate=terminal_growth_rate,
+        projection_years=projection_years,
+    )
+    if base_fair_value is None:
+        st.write("Fair Value calculation could not be completed due to missing data.")
+        return
+
+    fair_value_range = calculate_fair_value_range(
+        cashflow,
+        shares_outstanding,
+        discount_rate_base=discount_rate,
+        growth_rate_base=growth_rate,
+        terminal_growth_rate=terminal_growth_rate,
+        projection_years=projection_years,
+    )
+
+    assumption_df = pd.DataFrame(
+        [
+            ("Discount Rate", format_percent(discount_rate, 1), "Cost of capital"),
+            ("Growth Rate", format_percent(growth_rate, 1), "Years 1-5 FCF growth"),
+            ("Terminal Growth", format_percent(terminal_growth_rate, 1), "Perpetual growth"),
+            ("Projection Years", projection_years, "Explicit forecast horizon"),
+        ],
+        columns=["Assumption", "Value", "Notes"],
+    )
+
+    st.write(f"Calculated Fair Value (Enterprise Value per Share): **{format_currency(base_fair_value)}**")
+    if fair_value_range:
+        st.write(
+            f"Fair Value Confidence Interval: **{format_currency(fair_value_range[0])}** - **{format_currency(fair_value_range[1])}**"
+        )
+    st.caption("DCF outputs are scenario-based; adjust assumptions to reflect your investment case.")
+    st.table(assumption_df)
+
+
+def render_raw_data(info: Dict):
+    with st.expander("Raw Data (from yfinance)"):
+        st.json(info)
+
+
+def single_stock_analysis(philosophy, mode_description: str):
+    st.subheader(mode_description)
+    default_ticker = DEFAULT_TICKERS.get(philosophy.name, "AAPL")
+    ticker = st.sidebar.text_input("Enter Stock Ticker", value=default_ticker).strip().upper()
+
+    default_timeframe = PHILOSOPHY_TIMEFRAME_DEFAULTS.get(philosophy.name, "1 Year")
+    timeframe_index = TIMEFRAME_CHOICES.index(default_timeframe) if default_timeframe in TIMEFRAME_CHOICES else TIMEFRAME_CHOICES.index("1 Year")
+    timeframe_option = st.sidebar.selectbox("Select Time Frame for Price History", TIMEFRAME_CHOICES, index=timeframe_index)
+
+    _, timeframe_note, _ = resolve_timeframe(timeframe_option)
+
+    if not ticker:
+        st.info("Enter a ticker above to load company data.")
+        return
+
+    data = load_stock_bundle(ticker, timeframe_option)
+    info = data.get("info", {})
+    history = data.get("history", pd.DataFrame())
+    cashflow = data.get("cashflow", pd.DataFrame())
+
+    st.subheader(f"Stock Information: {ticker}")
+    render_company_profile(info)
+    render_key_financial_metrics(info)
+    render_dividend_section(info, philosophy.name)
+    render_governance_section(info)
+    render_price_section(history, info, timeframe_option, timeframe_note)
+    render_cashflow_section(cashflow)
+    render_dcf_section(info, cashflow, philosophy)
+    render_raw_data(info)
+
+
+def render_sp500_deals(philosophy_name: str, mode_description: str):
+    st.subheader(f"S&P 500 Deals Analysis — {philosophy_name}")
+    st.caption(mode_description)
     st.markdown("""
-    **Fair Value Calculation Explanation:**
+Fair value is estimated using a simplified DCF model that:
 
-    For each company, fair value is estimated using a simplified Discounted Cash Flow (DCF) model that:
+- Pulls the most recent Free Cash Flow.
+- Projects five years of cash flow using a 3% growth assumption.
+- Applies a 2% terminal growth rate and discounts at 10%.
+- Divides by shares outstanding to arrive at an enterprise value per share.
 
-    - **Extracts the most recent Free Cash Flow (FCF):**
-      Uses the most recent FCF value from the company's cash flow statement.
-
-    - **Projects FCF for 5 years:**
-      Assumes an annual FCF growth rate of **3%** for the next 5 years.
-
-    - **Calculates Terminal Value:**
-      Computes a terminal value at the end of the projection period using a terminal growth rate of **2%** and a discount rate of **10%**.
-
-    - **Discounts to Present Value:**
-      Discounts the projected FCF and terminal value back to the present using the discount rate.
-
-    - **Derives Fair Value per Share:**
-      Sums the present values to obtain the enterprise value and divides by the number of shares outstanding.
-
-    **Note:** This simplified DCF model is for exploratory analysis and may not capture all complexities of a company’s valuation.
-    """)
-    st.write(
-        "This analysis calculates the fair value for each company in the S&P 500 and compares it with the current trading price to highlight the best deals. (Companies missing necessary data are skipped.)")
+Companies missing any of those inputs are skipped, so treat this as a
+high-level triage for traditional value ideas.
+""")
     with st.spinner("Analyzing S&P 500 companies..."):
         sp500_df = analyze_sp500_deals()
     if sp500_df is not None and not sp500_df.empty:
@@ -293,39 +477,24 @@ elif mode == "SP500 Deals":
     else:
         st.write("No data available from the S&P 500 analysis.")
 
-########################################
-# QUALITY VS VALUE SCREENER MODE
-########################################
-elif mode == "Quality vs Value Screener":
-    st.subheader("Quality vs Value Screener")
+
+def render_quality_value_screener(philosophy_name: str, mode_description: str):
+    st.subheader(f"Quality vs Value Screener — {philosophy_name}")
+    st.caption(mode_description)
     st.markdown("""
-    **Quality vs. Value Screener Explanation:**
+This screener ranks stocks using a blended scoring model:
 
-    This screener ranks stocks based on a composite score derived from:
+- **Value Score (40%)** — DCF discount to price.
+- **Quality Score (30%)** — Return on Equity percentile.
+- **Growth Score (20%)** — Revenue growth percentile.
+- **Stability Score (10%)** — Inverted percentile for Debt-to-Equity.
 
-    - **Value Score:**
-      The discount between the fair value (calculated via a simplified DCF model) and the current trading price.
-      A higher discount (i.e., current price well below fair value) yields a higher value score.
-
-    - **Quality Score:**
-      Based on Return on Equity (ROE). Raw ROE values are converted into a percentile rank so that stocks with higher ROE receive higher scores.
-
-    - **Growth Score:**
-      Based on revenue growth, normalized by its percentile rank.
-
-    - **Stability Score:**
-      Based on debt-to-equity. Since lower debt is preferred, we invert the percentile ranking so that companies with lower ratios score higher.
-
-    The overall score is calculated as:
-
-    `Overall Score = 0.4 * Value Score + 0.3 * Quality Score + 0.2 * Growth Score + 0.1 * Stability Score`
-
-    Stocks with a higher overall score are considered better opportunities from a quality and value perspective.
-    """)
+Upload your own ticker list or pick one of the pre-loaded universes.
+Percentile ranks are calculated across the active universe only.
+""")
     with st.spinner("Analyzing selected/uploaded stocks for quality and value..."):
         qv_df = analyze_quality_value_screener()
     if qv_df is not None and not qv_df.empty:
-        # Add ranking columns for each individual score
         qv_df['Value Rank'] = qv_df['Value Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Quality Rank'] = qv_df['Quality Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Growth Rank'] = qv_df['Growth Score'].rank(method='min', ascending=False).astype(int)
@@ -344,3 +513,29 @@ elif mode == "Quality vs Value Screener":
         st.dataframe(qv_df.sort_values(by='Overall Rank').head(20).reset_index(drop=True))
     else:
         st.write("No data available from the Quality vs. Value Screener.")
+
+
+##############################
+# Sidebar Controls
+##############################
+
+philosophy_name = st.sidebar.selectbox("Investment Philosophy", get_philosophy_options())
+philosophy = get_philosophy(philosophy_name)
+
+ordered_modes = order_modes(philosophy_name)
+mode = st.sidebar.radio(
+    "Select Tool",
+    ordered_modes,
+    format_func=lambda m: f"{m} ⭐" if m in philosophy.tools else m,
+)
+st.sidebar.caption("⭐ Recommended for the selected philosophy.")
+st.sidebar.markdown("---")
+
+render_philosophy_summary(philosophy)
+
+if mode == "Single Stock Analysis":
+    single_stock_analysis(philosophy, MODE_DESCRIPTIONS[mode])
+elif mode == "SP500 Deals":
+    render_sp500_deals(philosophy.name, MODE_DESCRIPTIONS[mode])
+elif mode == "Quality vs Value Screener":
+    render_quality_value_screener(philosophy.name, MODE_DESCRIPTIONS[mode])

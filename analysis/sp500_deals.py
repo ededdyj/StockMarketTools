@@ -4,6 +4,14 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 from models.valuation import calculate_fair_value
+from config.philosophies import get_philosophy
+
+VALUE_PHILOSOPHY = get_philosophy("Long-term Value/DCF")
+DCF_ASSUMPTIONS = VALUE_PHILOSOPHY.default_assumptions
+DCF_DISCOUNT_RATE = DCF_ASSUMPTIONS.get("discount_rate", 0.10)
+DCF_GROWTH_RATE = DCF_ASSUMPTIONS.get("growth_rate", 0.03)
+DCF_TERMINAL_GROWTH = DCF_ASSUMPTIONS.get("terminal_growth_rate", 0.02)
+DCF_PROJECTION_YEARS = DCF_ASSUMPTIONS.get("projection_years", 5)
 
 @st.cache_data(show_spinner=False)
 def get_sp500_tickers():
@@ -47,7 +55,14 @@ def analyze_sp500_deals():
                 continue
 
             # Calculate fair value using our DCF model
-            fair_value = calculate_fair_value(cashflow, info.get("sharesOutstanding"))
+            fair_value = calculate_fair_value(
+                cashflow,
+                info.get("sharesOutstanding"),
+                discount_rate=DCF_DISCOUNT_RATE,
+                growth_rate=DCF_GROWTH_RATE,
+                terminal_growth_rate=DCF_TERMINAL_GROWTH,
+                projection_years=DCF_PROJECTION_YEARS,
+            )
             if fair_value is None:
                 continue
 

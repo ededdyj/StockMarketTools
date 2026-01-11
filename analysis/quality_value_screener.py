@@ -6,6 +6,7 @@ import streamlit as st
 import yfinance as yf
 
 from models.valuation import calculate_fair_value
+from config.philosophies import get_philosophy
 
 """
 Quality vs. Value Screener (CSV‑based, auto‑discover)
@@ -39,6 +40,17 @@ def _discover_csv_paths(folder: str = "data") -> dict[str, str]:
     return paths
 
 CSV_PATHS = _discover_csv_paths()
+GARP_PHILOSOPHY = get_philosophy("Growth-at-a-Reasonable-Price")
+GARP_ASSUMPTIONS = GARP_PHILOSOPHY.default_assumptions
+MIN_ROE = GARP_ASSUMPTIONS.get("min_roe", 0.12)
+MIN_REVENUE_GROWTH = GARP_ASSUMPTIONS.get("min_revenue_growth", 0.10)
+VALUE_WEIGHT = GARP_ASSUMPTIONS.get("value_weight", 0.4)
+DEFAULT_OTHER_WEIGHTS = (0.3, 0.2, 0.1)
+remaining_weight = max(0.0, 1.0 - VALUE_WEIGHT)
+scale = remaining_weight / sum(DEFAULT_OTHER_WEIGHTS) if sum(DEFAULT_OTHER_WEIGHTS) else 1.0
+QUALITY_WEIGHT = DEFAULT_OTHER_WEIGHTS[0] * scale
+GROWTH_WEIGHT = DEFAULT_OTHER_WEIGHTS[1] * scale
+STABILITY_WEIGHT = DEFAULT_OTHER_WEIGHTS[2] * scale
 
 # ---------------------------------------------------------------------------
 # 2. Ticker‑list loader
@@ -143,6 +155,9 @@ def analyze_quality_value_screener():
 
             d2e = info.get("debtToEquity")
 
+            meets_roe_target = roe is not None and roe >= MIN_ROE
+            meets_growth_target = rev_growth is not None and rev_growth >= MIN_REVENUE_GROWTH
+
             results.append({
                 "Ticker": ticker,
                 "Company": info.get("longName", ""),
@@ -153,6 +168,8 @@ def analyze_quality_value_screener():
                 "Raw ROE": roe,
                 "Raw Revenue Growth": rev_growth,
                 "Raw Debt‑to‑Equity": d2e,
+                "Meets ROE Target": meets_roe_target,
+                "Meets Growth Target": meets_growth_target,
             })
         except Exception:
             # Silently skip problematic tickers
@@ -174,10 +191,10 @@ def analyze_quality_value_screener():
         df[col] = df[col].fillna(0.5)
 
     df["Overall Score"] = (
-        0.4 * df["Value Score"] +
-        0.3 * df["Quality Score"] +
-        0.2 * df["Growth Score"] +
-        0.1 * df["Stability Score"]
+        VALUE_WEIGHT * df["Value Score"] +
+        QUALITY_WEIGHT * df["Quality Score"] +
+        GROWTH_WEIGHT * df["Growth Score"] +
+        STABILITY_WEIGHT * df["Stability Score"]
     )
 
     return df.sort_values("Overall Score", ascending=False)
