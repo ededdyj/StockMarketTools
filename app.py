@@ -14,9 +14,12 @@ from utils.charts import plot_price_history, plot_cashflow
 from analysis.sp500_deals import analyze_sp500_deals
 from analysis.quality_value_screener import analyze_quality_value_screener
 from config.philosophies import get_philosophy_options, get_philosophy
+from utils.logger import get_logger, read_recent_logs
 
 st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
 st.title("Eddy's Stocks - Personal Financial Dashboard")
+
+logger = get_logger(__name__)
 
 
 MODE_DESCRIPTIONS: Dict[str, str] = {
@@ -51,6 +54,8 @@ PHILOSOPHY_TIMEFRAME_DEFAULTS: Dict[str, str] = {
     "Index/Passive": "3 Year",
 }
 
+LOG_LINES_TO_DISPLAY = 200
+
 
 def _normalize_timeframe_kwargs(kwargs: Dict) -> Tuple[Tuple[str, object], ...]:
     """Convert timeframe kwargs into a hashable tuple for caching."""
@@ -79,6 +84,7 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
 
     timeframe_kwargs, timeframe_note, _ = resolve_timeframe(timeframe_option)
     timeframe_items = _normalize_timeframe_kwargs(timeframe_kwargs)
+    logger.info("Loading %s with timeframe %s", ticker, timeframe_option)
 
     try:
         data = _load_stock_bundle_cached(ticker, timeframe_items)
@@ -86,6 +92,7 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
         st.warning(
             f"Cached data retrieval failed for {ticker} ({exc}). Retrying without cache."
         )
+        logger.warning("Cache load failed for %s: %s", ticker, exc)
         data = None
 
     if not _data_is_complete(data):
@@ -93,6 +100,7 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
             f"Yahoo Finance returned incomplete data for {ticker}. Requesting a fresh"
             " pull without cache so you see the latest available information."
         )
+        logger.info("Cache miss or incomplete data for %s — refreshing directly from Yahoo", ticker)
         try:
             data = get_stock_data(ticker, timeframe=timeframe_kwargs)
         except Exception as inner_exc:
@@ -100,12 +108,14 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
                 f"Failed to load Yahoo Finance data for {ticker}: {inner_exc}."
                 " Please try again shortly."
             )
+            logger.error("Direct fetch failed for %s: %s", ticker, inner_exc)
             return {}, timeframe_note
         if not _data_is_complete(data):
             st.error(
                 f"Yahoo Finance is missing both fundamentals and price history for {ticker}."
                 " Try another ticker or different timeframe."
             )
+            logger.error("Yahoo returned empty data for %s even after refresh", ticker)
             return {}, timeframe_note
 
     return data, timeframe_note
@@ -128,6 +138,7 @@ def warn_if_data_missing(info: Dict, history: pd.DataFrame, cashflow: pd.DataFra
             f"Yahoo Finance returned incomplete data for {ticker}: {readable}."
             " Some sections below may be empty or rely on stale assumptions."
         )
+        logger.warning("%s missing sections: %s", ticker, readable)
 
 
 def _is_nan(value) -> bool:
@@ -503,6 +514,12 @@ def render_raw_data(info: Dict):
         st.json(info)
 
 
+def render_log_panel():
+    with st.expander("Application Logs (recent)"):
+        log_text = read_recent_logs(LOG_LINES_TO_DISPLAY)
+        st.text(log_text)
+
+
 def single_stock_analysis(philosophy, mode_description: str):
     st.subheader(mode_description)
     default_ticker = DEFAULT_TICKERS.get(philosophy.name, "AAPL")
@@ -630,3 +647,5 @@ elif mode == "SP500 Deals":
     render_sp500_deals(philosophy.name, MODE_DESCRIPTIONS[mode])
 elif mode == "Quality vs Value Screener":
     render_quality_value_screener(philosophy.name, MODE_DESCRIPTIONS[mode])
+
+render_log_panel()
