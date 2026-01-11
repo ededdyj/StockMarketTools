@@ -60,22 +60,18 @@ def _normalize_timeframe_kwargs(kwargs: Dict) -> Tuple[Tuple[str, object], ...]:
 
 @st.cache_data(show_spinner=False, ttl=900)
 def _load_stock_bundle_cached(ticker: str, timeframe_items: Tuple[Tuple[str, object], ...]) -> Dict:
-    """Cached wrapper around yfinance data pulls.
-
-    We raise when Yahoo Finance gives us nothing so that failures don't become
-    sticky cache entries.
-    """
+    """Cached wrapper around yfinance data pulls."""
 
     timeframe_kwargs = dict(timeframe_items)
-    data = get_stock_data(ticker, timeframe=timeframe_kwargs)
-    if not data:
-        raise ValueError("No response returned from yfinance.")
+    return get_stock_data(ticker, timeframe=timeframe_kwargs)
 
+
+def _data_is_complete(data: Dict) -> bool:
+    if not data:
+        return False
     info = data.get("info") or {}
     history = data.get("history", pd.DataFrame())
-    if not info and (history is None or history.empty):
-        raise ValueError("Missing both fundamentals and price history.")
-    return data
+    return bool(info) or (history is not None and not history.empty)
 
 
 def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
@@ -88,8 +84,14 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
         data = _load_stock_bundle_cached(ticker, timeframe_items)
     except Exception as exc:
         st.warning(
-            f"Data fetch for {ticker} was incomplete ({exc}). Retrying without cache"
-            " so you have the latest attempt."
+            f"Cached data retrieval failed for {ticker} ({exc}). Retrying without cache."
+        )
+        data = None
+
+    if not _data_is_complete(data):
+        st.warning(
+            f"Yahoo Finance returned incomplete data for {ticker}. Requesting a fresh"
+            " pull without cache so you see the latest available information."
         )
         try:
             data = get_stock_data(ticker, timeframe=timeframe_kwargs)
@@ -99,13 +101,12 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
                 " Please try again shortly."
             )
             return {}, timeframe_note
-
-    if not data:
-        st.error(
-            f"Unable to load any Yahoo Finance data for {ticker}. Please confirm the"
-            " ticker symbol or try again later."
-        )
-        return {}, timeframe_note
+        if not _data_is_complete(data):
+            st.error(
+                f"Yahoo Finance is missing both fundamentals and price history for {ticker}."
+                " Try another ticker or different timeframe."
+            )
+            return {}, timeframe_note
 
     return data, timeframe_note
 
