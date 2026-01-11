@@ -52,6 +52,76 @@ PHILOSOPHY_TIMEFRAME_DEFAULTS: Dict[str, str] = {
 }
 
 
+def _normalize_timeframe_kwargs(kwargs: Dict) -> Tuple[Tuple[str, object], ...]:
+    """Convert timeframe kwargs into a hashable tuple for caching."""
+
+    return tuple(sorted(kwargs.items()))
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def _load_stock_bundle_cached(ticker: str, timeframe_items: Tuple[Tuple[str, object], ...]) -> Dict:
+    """Cached wrapper around yfinance data pulls.
+
+    We raise when Yahoo Finance gives us nothing so that failures don't become
+    sticky cache entries.
+    """
+
+    timeframe_kwargs = dict(timeframe_items)
+    data = get_stock_data(ticker, timeframe=timeframe_kwargs)
+    if not data:
+        raise ValueError("No response returned from yfinance.")
+
+    info = data.get("info") or {}
+    history = data.get("history", pd.DataFrame())
+    if not info and (history is None or history.empty):
+        raise ValueError("Missing both fundamentals and price history.")
+    return data
+
+
+def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
+    """Fetch ticker data with cache fallback and return (data, timeframe_note)."""
+
+    timeframe_kwargs, timeframe_note, _ = resolve_timeframe(timeframe_option)
+    timeframe_items = _normalize_timeframe_kwargs(timeframe_kwargs)
+
+    try:
+        data = _load_stock_bundle_cached(ticker, timeframe_items)
+    except ValueError as exc:
+        st.warning(
+            f"Data fetch for {ticker} was incomplete ({exc}). Retrying without cache"
+            " so you have the latest attempt."
+        )
+        data = get_stock_data(ticker, timeframe=timeframe_kwargs)
+
+    if not data:
+        st.error(
+            f"Unable to load any Yahoo Finance data for {ticker}. Please confirm the"
+            " ticker symbol or try again later."
+        )
+        return {}, timeframe_note
+
+    return data, timeframe_note
+
+
+def warn_if_data_missing(info: Dict, history: pd.DataFrame, cashflow: pd.DataFrame, ticker: str) -> None:
+    """Surface a dashboard note whenever data is incomplete."""
+
+    missing_sections: List[str] = []
+    if not info:
+        missing_sections.append("company profile and valuation inputs")
+    if history is None or history.empty:
+        missing_sections.append("price history")
+    if cashflow is None or cashflow.empty:
+        missing_sections.append("cash flow statements / DCF inputs")
+
+    if missing_sections:
+        readable = ", ".join(missing_sections)
+        st.warning(
+            f"Yahoo Finance returned incomplete data for {ticker}: {readable}."
+            " Some sections below may be empty or rely on stale assumptions."
+        )
+
+
 def _is_nan(value) -> bool:
     try:
         return np.isnan(value)
@@ -434,22 +504,28 @@ def single_stock_analysis(philosophy, mode_description: str):
     timeframe_index = TIMEFRAME_CHOICES.index(default_timeframe) if default_timeframe in TIMEFRAME_CHOICES else TIMEFRAME_CHOICES.index("1 Year")
     timeframe_option = st.sidebar.selectbox("Select Time Frame for Price History", TIMEFRAME_CHOICES, index=timeframe_index)
 
-    _, timeframe_note, _ = resolve_timeframe(timeframe_option)
-
     if not ticker:
         st.info("Enter a ticker above to load company data.")
         return
 
-    data = load_stock_bundle(ticker, timeframe_option)
+    data, timeframe_note = load_stock_bundle(ticker, timeframe_option)
+    if not data:
+        return
+
     info = data.get("info", {})
     history = data.get("history", pd.DataFrame())
     cashflow = data.get("cashflow", pd.DataFrame())
 
+    warn_if_data_missing(info, history, cashflow, ticker)
+
     st.subheader(f"Stock Information: {ticker}")
-    render_company_profile(info)
-    render_key_financial_metrics(info)
-    render_dividend_section(info, philosophy.name)
-    render_governance_section(info)
+    if info:
+        render_company_profile(info)
+        render_key_financial_metrics(info)
+        render_dividend_section(info, philosophy.name)
+        render_governance_section(info)
+    else:
+        st.info("Company fundamentals are unavailable for this ticker from Yahoo Finance.")
     render_price_section(history, info, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
     render_dcf_section(info, cashflow, philosophy)
