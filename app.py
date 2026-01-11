@@ -240,12 +240,6 @@ def resolve_timeframe(option: str) -> Tuple[Dict, str, str]:
     )
 
 
-@st.cache_data(show_spinner=False, ttl=900)
-def load_stock_bundle(ticker: str, timeframe_option: str) -> Dict:
-    timeframe_kwargs, _, _ = resolve_timeframe(timeframe_option)
-    return get_stock_data(ticker, timeframe=timeframe_kwargs)
-
-
 def order_modes(philosophy_name: str) -> List[str]:
     philosophy = get_philosophy(philosophy_name)
     preferred = [mode for mode in MODE_DESCRIPTIONS if mode in philosophy.tools]
