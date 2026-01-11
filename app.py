@@ -516,7 +516,14 @@ def single_stock_analysis(philosophy, mode_description: str):
         st.info("Enter a ticker above to load company data.")
         return
 
-    data, timeframe_note = load_stock_bundle(ticker, timeframe_option)
+    try:
+        data, timeframe_note = load_stock_bundle(ticker, timeframe_option)
+    except Exception as exc:
+        st.error(
+            f"Unexpected error while retrieving data for {ticker}: {exc}."
+            " This has been logged; please try again shortly."
+        )
+        return
     if not data:
         return
 
