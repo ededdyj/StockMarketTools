@@ -86,12 +86,19 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
 
     try:
         data = _load_stock_bundle_cached(ticker, timeframe_items)
-    except ValueError as exc:
+    except Exception as exc:
         st.warning(
             f"Data fetch for {ticker} was incomplete ({exc}). Retrying without cache"
             " so you have the latest attempt."
         )
-        data = get_stock_data(ticker, timeframe=timeframe_kwargs)
+        try:
+            data = get_stock_data(ticker, timeframe=timeframe_kwargs)
+        except Exception as inner_exc:
+            st.error(
+                f"Failed to load Yahoo Finance data for {ticker}: {inner_exc}."
+                " Please try again shortly."
+            )
+            return {}, timeframe_note
 
     if not data:
         st.error(
