@@ -130,8 +130,9 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
 
             if _data_is_complete(fallback_data):
                 st.info(
-                    f"Displayed data for {ticker} uses a 1-year fallback timeframe because the"
-                    " requested window lacked usable history/fundamentals."
+                    f"Price charts for {ticker} use a trailing 1-year fallback because the"
+                    " requested window lacked usable price data. Fundamentals continue to"
+                    " rely on the latest filings from Yahoo Finance."
                 )
                 logger.info("Using fallback timeframe for %s", ticker)
                 return fallback_data, "Fallback to trailing twelve months."
@@ -501,15 +502,15 @@ def render_dcf_section(info: Dict, cashflow: pd.DataFrame, fundamentals: Fundame
         return
 
     cards = [
-        ("Enterprise Value (EV)", valuation.enterprise_value),
-        ("Net Debt", fundamentals.net_debt),
-        ("Equity Value (EV - Net Debt)", valuation.equity_value),
-        ("Fair Value per Share", valuation.fair_value_per_share),
+        ("Enterprise Value (EV)", valuation.enterprise_value, 0),
+        ("Net Debt", fundamentals.net_debt, 0),
+        ("Equity Value (EV - Net Debt)", valuation.equity_value, 0),
+        ("Fair Value per Share", valuation.fair_value_per_share, 2),
     ]
     cols = st.columns(len(cards))
-    for col, (label, value) in zip(cols, cards):
+    for col, (label, value, precision) in zip(cols, cards):
         with col:
-            st.metric(label, format_currency(value, 2 if "Share" in label else 0))
+            st.metric(label, format_currency(value, precision))
 
     fair_value_range = calculate_fair_value_range(
         cashflow,

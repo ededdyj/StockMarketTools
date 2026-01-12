@@ -142,7 +142,7 @@ def analyze_quality_value_screener():
                 continue
 
             fair_value = valuation.fair_value_per_share
-            if fair_value and fair_value > 0:
+            if fair_value is not None and fair_value > 0:
                 discount_pct = ((fair_value - current_price) / current_price) * 100
                 value_score = max((fair_value - current_price) / fair_value, 0)
             else:
@@ -176,7 +176,7 @@ def analyze_quality_value_screener():
                 "Raw Debt‑to‑Equity": d2e,
                 "Meets ROE Target": meets_roe_target,
                 "Meets Growth Target": meets_growth_target,
-                "Fundamental Notes": "; ".join(fundamentals.warnings),
+                "Fundamental Notes": " | ".join(fundamentals.note_tags) if fundamentals.note_tags else "",
             })
         except Exception:
             # Silently skip problematic tickers

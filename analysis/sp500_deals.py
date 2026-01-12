@@ -1,6 +1,7 @@
 # analysis/sp500_deals.py
 
 import numpy as np
+import numpy as np
 import pandas as pd
 import yfinance as yf
 import streamlit as st
@@ -83,7 +84,7 @@ def analyze_sp500_deals():
                 "Fair Value": fair_value,
                 "Net Debt": fundamentals.net_debt,
                 "Discount (%)": discount_pct,
-                "Data Notes": "; ".join(fundamentals.warnings),
+                "Notes": " | ".join(fundamentals.note_tags) if fundamentals.note_tags else "",
             })
         except Exception as e:
             # Skip problematic tickers

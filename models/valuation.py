@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 
 @dataclass
@@ -11,9 +12,26 @@ class ValuationResult:
     fair_value_per_share: Optional[float]
 
 
+def _latest_period_column(frame) -> Optional[str]:
+    if frame is None or frame.empty:
+        return None
+    columns = list(frame.columns)
+    if not columns:
+        return None
+    parsed = pd.to_datetime(columns, errors="coerce")
+    parsed_series = pd.Series(parsed)
+    if parsed_series.notna().any():
+        latest_idx = parsed_series.idxmax()
+    else:
+        latest_idx = 0
+    return columns[latest_idx]
+
+
 def _latest_free_cash_flow(cashflow_df):
-    recent_period = cashflow_df.columns[0]
-    return cashflow_df.loc['Free Cash Flow', recent_period]
+    latest_column = _latest_period_column(cashflow_df)
+    if latest_column is None:
+        raise ValueError("Cash flow periods missing")
+    return cashflow_df.loc['Free Cash Flow', latest_column]
 
 
 def calculate_fair_value(
@@ -41,6 +59,8 @@ def calculate_fair_value(
 
     equity_value = None
     if net_debt is not None:
+        # Net debt is subtracted exactly once so that positive debt reduces
+        # equity value and net cash (negative net debt) increases it.
         equity_value = enterprise_value - net_debt
     else:
         equity_value = enterprise_value
