@@ -110,7 +110,31 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
             )
             logger.error("Direct fetch failed for %s: %s", ticker, inner_exc)
             return {}, timeframe_note
+
         if not _data_is_complete(data):
+            logger.warning(
+                "%s still lacks usable data after refresh. Attempting fallback timeframe.",
+                ticker,
+            )
+            fallback_kwargs = {"period": "1y"}
+            try:
+                fallback_data = get_stock_data(ticker, timeframe=fallback_kwargs)
+            except Exception as fallback_exc:
+                logger.error("Fallback fetch failed for %s: %s", ticker, fallback_exc)
+                st.error(
+                    f"Yahoo Finance failed to provide data for {ticker}: {fallback_exc}."
+                    " Please try again shortly."
+                )
+                return {}, timeframe_note
+
+            if _data_is_complete(fallback_data):
+                st.info(
+                    f"Displayed data for {ticker} uses a 1-year fallback timeframe because the"
+                    " requested window lacked usable history/fundamentals."
+                )
+                logger.info("Using fallback timeframe for %s", ticker)
+                return fallback_data, "Fallback to trailing twelve months."
+
             st.error(
                 f"Yahoo Finance is missing both fundamentals and price history for {ticker}."
                 " Try another ticker or different timeframe."
