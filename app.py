@@ -15,6 +15,7 @@ from analysis.sp500_deals import analyze_sp500_deals
 from analysis.quality_value_screener import analyze_quality_value_screener
 from config.philosophies import get_philosophy_options, get_philosophy
 from utils.logger import get_logger, read_recent_logs
+from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
 
 st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
 st.title("Eddy's Stocks - Personal Financial Dashboard")
@@ -475,10 +476,9 @@ def render_cashflow_section(cashflow: pd.DataFrame):
         st.write("Free Cash Flow data not available.")
 
 
-def render_dcf_section(info: Dict, cashflow: pd.DataFrame, philosophy):
+def render_dcf_section(info: Dict, cashflow: pd.DataFrame, fundamentals: FundamentalsSnapshot, philosophy):
     st.subheader("Intrinsic Value (DCF Model)")
-    shares_outstanding = info.get("sharesOutstanding")
-    if not shares_outstanding or cashflow is None or cashflow.empty:
+    if cashflow is None or cashflow.empty:
         st.write("Insufficient data to calculate fair value.")
         return
 
@@ -487,26 +487,46 @@ def render_dcf_section(info: Dict, cashflow: pd.DataFrame, philosophy):
     terminal_growth_rate = philosophy.default_assumptions.get("terminal_growth_rate", 0.02)
     projection_years = philosophy.default_assumptions.get("projection_years", 5)
 
-    base_fair_value = calculate_fair_value(
+    valuation = calculate_fair_value(
         cashflow,
-        shares_outstanding,
+        net_debt=fundamentals.net_debt,
+        shares_outstanding=fundamentals.shares_outstanding,
         discount_rate=discount_rate,
         growth_rate=growth_rate,
         terminal_growth_rate=terminal_growth_rate,
         projection_years=projection_years,
     )
-    if base_fair_value is None:
+    if valuation is None:
         st.write("Fair Value calculation could not be completed due to missing data.")
         return
 
+    cards = [
+        ("Enterprise Value (EV)", valuation.enterprise_value),
+        ("Net Debt", fundamentals.net_debt),
+        ("Equity Value (EV - Net Debt)", valuation.equity_value),
+        ("Fair Value per Share", valuation.fair_value_per_share),
+    ]
+    cols = st.columns(len(cards))
+    for col, (label, value) in zip(cols, cards):
+        with col:
+            st.metric(label, format_currency(value, 2 if "Share" in label else 0))
+
     fair_value_range = calculate_fair_value_range(
         cashflow,
-        shares_outstanding,
+        net_debt=fundamentals.net_debt,
+        shares_outstanding=fundamentals.shares_outstanding,
         discount_rate_base=discount_rate,
         growth_rate_base=growth_rate,
         terminal_growth_rate=terminal_growth_rate,
         projection_years=projection_years,
     )
+
+    if fair_value_range:
+        st.caption(
+            f"Fair Value Confidence Interval: {format_currency(fair_value_range[0])} - {format_currency(fair_value_range[1])}"
+        )
+    elif valuation.fair_value_per_share is None:
+        st.info("Per-share valuation requires a reliable share count; Yahoo Finance did not supply one.")
 
     assumption_df = pd.DataFrame(
         [
@@ -518,13 +538,24 @@ def render_dcf_section(info: Dict, cashflow: pd.DataFrame, philosophy):
         columns=["Assumption", "Value", "Notes"],
     )
 
-    st.write(f"Calculated Fair Value (Enterprise Value per Share): **{format_currency(base_fair_value)}**")
-    if fair_value_range:
-        st.write(
-            f"Fair Value Confidence Interval: **{format_currency(fair_value_range[0])}** - **{format_currency(fair_value_range[1])}**"
+    with st.expander("Assumptions & Data"):
+        st.table(assumption_df)
+        st.markdown(
+            "- **Net debt formula:** Total Debt"
+            f" ({fundamentals.debt_source or 'missing'}) - Cash & Equivalents"
+            f" ({fundamentals.cash_source or 'missing'}) = {format_currency(fundamentals.net_debt, 0)}"
         )
+        st.markdown(
+            f"- **Shares used:** {fundamentals.shares_source or 'Unavailable'}"
+            f" ({format_int(fundamentals.shares_outstanding) if fundamentals.shares_outstanding else 'N/A'})"
+        )
+        st.markdown("- **Data source:** Yahoo Finance via yfinance")
+        st.markdown(
+            f"- **Balance sheet as of:** {fundamentals.balance_sheet_as_of or 'N/A'}"
+            f" | **Pulled at:** {fundamentals.pulled_at}"
+        )
+
     st.caption("DCF outputs are scenario-based; adjust assumptions to reflect your investment case.")
-    st.table(assumption_df)
 
 
 def render_raw_data(info: Dict):
@@ -565,6 +596,9 @@ def single_stock_analysis(philosophy, mode_description: str):
     info = data.get("info", {})
     history = data.get("history", pd.DataFrame())
     cashflow = data.get("cashflow", pd.DataFrame())
+    balance_sheet = data.get("balance_sheet")
+
+    fundamentals = extract_fundamentals(info, balance_sheet)
 
     warn_if_data_missing(info, history, cashflow, ticker)
 
@@ -578,7 +612,9 @@ def single_stock_analysis(philosophy, mode_description: str):
         st.info("Company fundamentals are unavailable for this ticker from Yahoo Finance.")
     render_price_section(history, info, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
-    render_dcf_section(info, cashflow, philosophy)
+    render_dcf_section(info, cashflow, fundamentals, philosophy)
+    if fundamentals.warnings:
+        st.warning("\n".join(fundamentals.warnings))
     render_raw_data(info)
 
 
@@ -591,7 +627,8 @@ Fair value is estimated using a simplified DCF model that:
 - Pulls the most recent Free Cash Flow.
 - Projects five years of cash flow using a 3% growth assumption.
 - Applies a 2% terminal growth rate and discounts at 10%.
-- Divides by shares outstanding to arrive at an enterprise value per share.
+- Subtracts net debt (Total Debt − Cash) to convert Enterprise Value to Equity Value.
+- Divides Equity Value by shares outstanding to arrive at a fair value per share.
 
 Companies missing any of those inputs are skipped, so treat this as a
 high-level triage for traditional value ideas.

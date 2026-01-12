@@ -1,10 +1,12 @@
 # analysis/sp500_deals.py
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 import streamlit as st
 from models.valuation import calculate_fair_value
 from config.philosophies import get_philosophy
+from utils.fundamentals import extract_fundamentals
 
 VALUE_PHILOSOPHY = get_philosophy("Long-term Value/DCF")
 DCF_ASSUMPTIONS = VALUE_PHILOSOPHY.default_assumptions
@@ -42,8 +44,7 @@ def analyze_sp500_deals():
             stock = yf.Ticker(ticker)
             info = stock.info
 
-            # Ensure we have the required data
-            if not info or "sharesOutstanding" not in info:
+            if not info:
                 continue
 
             current_price = info.get("currentPrice") or info.get("regularMarketPrice")
@@ -54,27 +55,35 @@ def analyze_sp500_deals():
             if cashflow is None or cashflow.empty:
                 continue
 
+            fundamentals = extract_fundamentals(info, stock.balance_sheet)
+
             # Calculate fair value using our DCF model
-            fair_value = calculate_fair_value(
+            valuation = calculate_fair_value(
                 cashflow,
-                info.get("sharesOutstanding"),
+                net_debt=fundamentals.net_debt,
+                shares_outstanding=fundamentals.shares_outstanding,
                 discount_rate=DCF_DISCOUNT_RATE,
                 growth_rate=DCF_GROWTH_RATE,
                 terminal_growth_rate=DCF_TERMINAL_GROWTH,
                 projection_years=DCF_PROJECTION_YEARS,
             )
-            if fair_value is None:
+            if valuation is None:
                 continue
+            fair_value = valuation.fair_value_per_share
 
             # Calculate percentage discount (if fair value > current price, discount is positive)
-            discount_pct = ((fair_value - current_price) / current_price) * 100
+            discount_pct = np.nan
+            if fair_value is not None and current_price:
+                discount_pct = ((fair_value - current_price) / current_price) * 100
             company_name = info.get("longName", "")
             results.append({
                 "Ticker": ticker,
                 "Company": company_name,
                 "Current Price": current_price,
                 "Fair Value": fair_value,
-                "Discount (%)": discount_pct
+                "Net Debt": fundamentals.net_debt,
+                "Discount (%)": discount_pct,
+                "Data Notes": "; ".join(fundamentals.warnings),
             })
         except Exception as e:
             # Skip problematic tickers

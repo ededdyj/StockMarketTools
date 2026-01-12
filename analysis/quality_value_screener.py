@@ -6,6 +6,7 @@ import streamlit as st
 import yfinance as yf
 
 from models.valuation import calculate_fair_value
+from utils.fundamentals import extract_fundamentals
 from config.philosophies import get_philosophy
 
 """
@@ -124,21 +125,25 @@ def analyze_quality_value_screener():
         try:
             stock = yf.Ticker(ticker)
             info = stock.info or {}
-            shares_out = info.get("sharesOutstanding")
             current_price = info.get("currentPrice") or info.get("regularMarketPrice")
             cashflow = stock.cashflow
 
-            # Skip if critical data is missing
-            if not shares_out or current_price is None or cashflow is None or cashflow.empty:
+            # Skip if we cannot price the security at all
+            if current_price is None or cashflow is None or cashflow.empty:
                 continue
 
-            fair_value = calculate_fair_value(cashflow, shares_out)
-            if fair_value is None:
+            fundamentals = extract_fundamentals(info, stock.balance_sheet)
+            valuation = calculate_fair_value(
+                cashflow,
+                net_debt=fundamentals.net_debt,
+                shares_outstanding=fundamentals.shares_outstanding,
+            )
+            if valuation is None:
                 continue
 
-            # Value score only meaningful when fair_value > 0
-            if fair_value > 0:
-                discount_pct = ((fair_value - current_price) / current_price) * 100 if current_price else None
+            fair_value = valuation.fair_value_per_share
+            if fair_value and fair_value > 0:
+                discount_pct = ((fair_value - current_price) / current_price) * 100
                 value_score = max((fair_value - current_price) / fair_value, 0)
             else:
                 discount_pct = None
@@ -165,11 +170,13 @@ def analyze_quality_value_screener():
                 "Fair Value": fair_value,
                 "Discount (%)": discount_pct,
                 "Value Score": value_score,
+                "Net Debt": fundamentals.net_debt,
                 "Raw ROE": roe,
                 "Raw Revenue Growth": rev_growth,
                 "Raw Debt‑to‑Equity": d2e,
                 "Meets ROE Target": meets_roe_target,
                 "Meets Growth Target": meets_growth_target,
+                "Fundamental Notes": "; ".join(fundamentals.warnings),
             })
         except Exception:
             # Silently skip problematic tickers

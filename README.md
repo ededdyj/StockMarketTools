@@ -35,12 +35,23 @@ not optimized to do.
 - **Discounted Cash Flow (used in Single Stock and SP500 Deals)**
   - Uses the most recent Free Cash Flow from `yfinance.cashflow`.
   - Projects cash flow for *n* years (default `n = 5`) with growth rate `g`.
-  - Present value `PV = Σ (FCF_t / (1 + r)^t) + TerminalValue`, where
+  - Present value `EV = Σ (FCF_t / (1 + r)^t) + TerminalValue`, where
     `TerminalValue = FCF_n * (1 + g_terminal) / (r - g_terminal)`.
-  - Enterprise value per share = `(PV - NetDebt) / SharesOutstanding` (net debt
-    assumed zero with free data; adjust externally if needed).
+  - Equity value = `EV - NetDebt`, where `NetDebt = TotalDebt - Cash & Equivalents`
+    sourced from the latest Yahoo Finance balance sheet (Long Term + Short Term
+    debt is used when `Total Debt` is missing).
+  - Fair value per share = `Equity Value / Shares Outstanding`; the UI disables
+    per-share output if Yahoo Finance does not supply a reliable share count.
   - Confidence intervals vary discount/growth ± small bands to illustrate
     sensitivity.
+
+- **Net Debt & Shares Fallbacks**
+  - Cash and debt line items fall back to zero with a warning if Yahoo Finance
+    omits them. The “Assumptions & Data” expander shows which fields were used
+    and the balance-sheet “as-of” date.
+  - Shares default to `sharesOutstanding`, then to `impliedSharesOutstanding`.
+    Missing/zero values disable per-share DCF output and surface a warning in the
+    UI as well as the log panel.
 
 - **Value Score (Quality vs Value Screener)**
   - `ValueScore = max((FairValue - Price) / FairValue, 0)`.
@@ -95,7 +106,8 @@ not optimized to do.
 
 - Free `yfinance` data can lag official filings and may mark risk metrics as
   `None`; the UI will label missing values clearly.
-- Intrinsic value assumes net debt = 0; adjust valuations externally for more
-  precise capital-structure modeling.
+- Balance-sheet gaps from Yahoo Finance are explicitly flagged and fall back to
+  zero for modeling purposes; always cross-check before making capital
+  decisions.
 - Momentum/Trend mode is visualization-only; no stop-loss or trade execution is
   provided.

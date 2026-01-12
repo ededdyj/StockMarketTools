@@ -25,10 +25,12 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
             history = stock.history(**timeframe)
 
         cashflow = stock.cashflow  # Typically a DataFrame with financial periods as columns
+        balance_sheet = stock.balance_sheet
         return {
             "info": info,
             "history": history,
-            "cashflow": cashflow
+            "cashflow": cashflow,
+            "balance_sheet": balance_sheet,
         }
     except Exception as e:
         print(f"Error fetching data for {ticker}: {e}")

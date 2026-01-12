@@ -1,53 +1,75 @@
+from dataclasses import dataclass
+from typing import Optional
+
 import numpy as np
 
 
-def calculate_fair_value(cashflow_df, shares_outstanding, discount_rate=0.10, growth_rate=0.03,
-                         terminal_growth_rate=0.02, projection_years=5):
-    """
-    Calculates a simplistic fair value using a Discounted Cash Flow (DCF) model.
-    Assumes:
-      - 'Free Cash Flow' is available in cashflow_df.
-      - cashflow_df columns are sorted with the most recent period first.
+@dataclass
+class ValuationResult:
+    enterprise_value: Optional[float]
+    equity_value: Optional[float]
+    fair_value_per_share: Optional[float]
 
-    Parameters:
-      cashflow_df (DataFrame): Cash flow data from yfinance.
-      shares_outstanding (int): Number of shares outstanding.
-      discount_rate (float): The discount rate (default 10%).
-      growth_rate (float): Annual growth rate for free cash flow (default 3%).
-      terminal_growth_rate (float): Growth rate after projection period (default 2%).
-      projection_years (int): Number of years to project cash flows (default 5).
 
-    Returns:
-      fair_value_per_share (float) or None if calculation fails.
-    """
+def _latest_free_cash_flow(cashflow_df):
+    recent_period = cashflow_df.columns[0]
+    return cashflow_df.loc['Free Cash Flow', recent_period]
+
+
+def calculate_fair_value(
+    cashflow_df,
+    net_debt: Optional[float] = None,
+    shares_outstanding: Optional[float] = None,
+    discount_rate: float = 0.10,
+    growth_rate: float = 0.03,
+    terminal_growth_rate: float = 0.02,
+    projection_years: int = 5,
+) -> Optional[ValuationResult]:
+    """Return enterprise/equity/per-share valuation details."""
+
     try:
-        # Assume the first column holds the most recent data
-        recent_period = cashflow_df.columns[0]
-        # Extract the free cash flow value; adjust the row key as needed based on yfinance output
-        fcf = cashflow_df.loc['Free Cash Flow', recent_period]
+        fcf = _latest_free_cash_flow(cashflow_df)
     except Exception as e:
         print("Error accessing Free Cash Flow data:", e)
         return None
 
-    # Project future free cash flows
     projected_fcf = [fcf * ((1 + growth_rate) ** i) for i in range(1, projection_years + 1)]
-
-    # Calculate terminal value
     terminal_value = projected_fcf[-1] * (1 + terminal_growth_rate) / (discount_rate - terminal_growth_rate)
-
-    # Discount cash flows to present value
     pv_fcf = sum([cf / ((1 + discount_rate) ** i) for i, cf in enumerate(projected_fcf, start=1)])
     pv_terminal = terminal_value / ((1 + discount_rate) ** projection_years)
-
     enterprise_value = pv_fcf + pv_terminal
-    # For simplicity, assume net debt is zero. Fair value per share is enterprise value divided by shares outstanding.
-    fair_value_per_share = enterprise_value / shares_outstanding
-    return fair_value_per_share
+
+    equity_value = None
+    if net_debt is not None:
+        equity_value = enterprise_value - net_debt
+    else:
+        equity_value = enterprise_value
+
+    fair_value_per_share = None
+    if equity_value is not None and shares_outstanding:
+        try:
+            fair_value_per_share = equity_value / shares_outstanding
+        except ZeroDivisionError:
+            fair_value_per_share = None
+
+    return ValuationResult(
+        enterprise_value=enterprise_value,
+        equity_value=equity_value,
+        fair_value_per_share=fair_value_per_share,
+    )
 
 
-def calculate_fair_value_range(cashflow_df, shares_outstanding, discount_rate_base=0.10, growth_rate_base=0.03,
-                               terminal_growth_rate=0.02, projection_years=5, discount_rate_variation=0.02,
-                               growth_rate_variation=0.01):
+def calculate_fair_value_range(
+    cashflow_df,
+    net_debt: Optional[float] = None,
+    shares_outstanding: Optional[float] = None,
+    discount_rate_base=0.10,
+    growth_rate_base=0.03,
+    terminal_growth_rate=0.02,
+    projection_years=5,
+    discount_rate_variation=0.02,
+    growth_rate_variation=0.01,
+):
     """
     Calculate a confidence interval for the fair value per share by varying the discount and growth rates.
 
@@ -73,15 +95,18 @@ def calculate_fair_value_range(cashflow_df, shares_outstanding, discount_rate_ba
     fair_values = []
     for d in discount_values:
         for g in growth_values:
-            try:
-                fv = calculate_fair_value(cashflow_df, shares_outstanding, discount_rate=d, growth_rate=g,
-                                          terminal_growth_rate=terminal_growth_rate, projection_years=projection_years)
-                if fv is not None:
-                    fair_values.append(fv)
-            except Exception as e:
-                continue
+            result = calculate_fair_value(
+                cashflow_df,
+                net_debt=net_debt,
+                shares_outstanding=shares_outstanding,
+                discount_rate=d,
+                growth_rate=g,
+                terminal_growth_rate=terminal_growth_rate,
+                projection_years=projection_years,
+            )
+            if result and result.fair_value_per_share is not None:
+                fair_values.append(result.fair_value_per_share)
 
     if not fair_values:
         return None
     return min(fair_values), max(fair_values)
-
