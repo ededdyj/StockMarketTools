@@ -6,6 +6,34 @@ import pandas as pd
 
 
 @dataclass
+class DcfAssumptions:
+    discount_rate: float
+    growth_rate: float
+    terminal_growth_rate: float
+    projection_years: int
+
+    @classmethod
+    def defaults(cls) -> "DcfAssumptions":
+        return cls(0.10, 0.03, 0.02, 5)
+
+    def validate(self) -> tuple[bool, Optional[str]]:
+        errors = []
+        if not (-0.5 <= self.discount_rate <= 0.5):
+            errors.append("Discount rate must be between -50% and 50%.")
+        if not (-0.5 <= self.growth_rate <= 0.5):
+            errors.append("Growth rate must be between -50% and 50%.")
+        if not (-0.5 <= self.terminal_growth_rate <= 0.5):
+            errors.append("Terminal growth must be between -50% and 50%.")
+        if not (1 <= self.projection_years <= 20):
+            errors.append("Projection years must be between 1 and 20.")
+        if self.discount_rate <= self.terminal_growth_rate:
+            errors.append("Discount rate must be greater than terminal growth rate.")
+        if errors:
+            return False, " ".join(errors)
+        return True, None
+
+
+@dataclass
 class ValuationResult:
     enterprise_value: Optional[float]
     equity_value: Optional[float]
@@ -38,12 +66,20 @@ def calculate_fair_value(
     cashflow_df,
     net_debt: Optional[float] = None,
     shares_outstanding: Optional[float] = None,
+    assumptions: Optional[DcfAssumptions] = None,
     discount_rate: float = 0.10,
     growth_rate: float = 0.03,
     terminal_growth_rate: float = 0.02,
     projection_years: int = 5,
 ) -> Optional[ValuationResult]:
     """Return enterprise/equity/per-share valuation details."""
+
+    if assumptions is None:
+        assumptions = DcfAssumptions(discount_rate, growth_rate, terminal_growth_rate, projection_years)
+    discount_rate = assumptions.discount_rate
+    growth_rate = assumptions.growth_rate
+    terminal_growth_rate = assumptions.terminal_growth_rate
+    projection_years = assumptions.projection_years
 
     try:
         fcf = _latest_free_cash_flow(cashflow_df)
@@ -83,6 +119,7 @@ def calculate_fair_value_range(
     cashflow_df,
     net_debt: Optional[float] = None,
     shares_outstanding: Optional[float] = None,
+    assumptions: Optional[DcfAssumptions] = None,
     discount_rate_base=0.10,
     growth_rate_base=0.03,
     terminal_growth_rate=0.02,
@@ -107,22 +144,30 @@ def calculate_fair_value_range(
       (min_fair_value, max_fair_value) tuple if calculations succeed, else None.
     """
     # Define the grid of assumption values
-    discount_values = [discount_rate_base - discount_rate_variation, discount_rate_base,
-                       discount_rate_base + discount_rate_variation]
-    growth_values = [growth_rate_base - growth_rate_variation, growth_rate_base,
-                     growth_rate_base + growth_rate_variation]
+    if assumptions is None:
+        assumptions = DcfAssumptions(discount_rate_base, growth_rate_base, terminal_growth_rate, projection_years)
+
+    discount_values = [assumptions.discount_rate - discount_rate_variation,
+                       assumptions.discount_rate,
+                       assumptions.discount_rate + discount_rate_variation]
+    growth_values = [assumptions.growth_rate - growth_rate_variation,
+                     assumptions.growth_rate,
+                     assumptions.growth_rate + growth_rate_variation]
 
     fair_values = []
     for d in discount_values:
         for g in growth_values:
+            scenario_assumptions = DcfAssumptions(
+                discount_rate=d,
+                growth_rate=g,
+                terminal_growth_rate=assumptions.terminal_growth_rate,
+                projection_years=assumptions.projection_years,
+            )
             result = calculate_fair_value(
                 cashflow_df,
                 net_debt=net_debt,
                 shares_outstanding=shares_outstanding,
-                discount_rate=d,
-                growth_rate=g,
-                terminal_growth_rate=terminal_growth_rate,
-                projection_years=projection_years,
+                assumptions=scenario_assumptions,
             )
             if result and result.fair_value_per_share is not None:
                 fair_values.append(result.fair_value_per_share)

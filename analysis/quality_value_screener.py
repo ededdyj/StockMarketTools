@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-from models.valuation import calculate_fair_value
+from models.valuation import calculate_fair_value, DcfAssumptions
 from utils.fundamentals import extract_fundamentals
 from config.philosophies import get_philosophy
 
@@ -52,6 +52,7 @@ scale = remaining_weight / sum(DEFAULT_OTHER_WEIGHTS) if sum(DEFAULT_OTHER_WEIGH
 QUALITY_WEIGHT = DEFAULT_OTHER_WEIGHTS[0] * scale
 GROWTH_WEIGHT = DEFAULT_OTHER_WEIGHTS[1] * scale
 STABILITY_WEIGHT = DEFAULT_OTHER_WEIGHTS[2] * scale
+SCREENER_DCF_ASSUMPTIONS = DcfAssumptions.defaults()
 
 # ---------------------------------------------------------------------------
 # 2. Ticker‑list loader
@@ -137,6 +138,7 @@ def analyze_quality_value_screener():
                 cashflow,
                 net_debt=fundamentals.net_debt,
                 shares_outstanding=fundamentals.shares_outstanding,
+                assumptions=SCREENER_DCF_ASSUMPTIONS,
             )
             if valuation is None:
                 continue

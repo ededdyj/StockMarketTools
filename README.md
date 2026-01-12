@@ -44,6 +44,11 @@ not optimized to do.
     per-share output if Yahoo Finance does not supply a reliable share count.
   - Confidence intervals vary discount/growth ± small bands to illustrate
     sensitivity.
+  - In single-stock mode, the sidebar exposes editable assumptions (discount
+    rate 10%, growth 3%, terminal growth 2%, projection horizon 5 years) with a
+    reset-to-defaults button. Inputs are validated so discount rate must remain
+    between -50% and 50% and greater than the terminal growth rate; invalid
+    combinations block the DCF output with an on-screen warning.
 
 - **Net Debt & Shares Fallbacks**
   - Cash and debt line items fall back to zero with a warning if Yahoo Finance

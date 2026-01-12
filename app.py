@@ -6,10 +6,10 @@ yf.shared._requests_kwargs = {"timeout": 60}
 
 import streamlit as st
 import pandas as pd
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 from data.fetcher import get_stock_data
-from models.valuation import calculate_fair_value, calculate_fair_value_range
+from models.valuation import calculate_fair_value, calculate_fair_value_range, DcfAssumptions
 from utils.charts import plot_price_history, plot_cashflow
 from analysis.sp500_deals import analyze_sp500_deals
 from analysis.quality_value_screener import analyze_quality_value_screener
@@ -56,6 +56,10 @@ PHILOSOPHY_TIMEFRAME_DEFAULTS: Dict[str, str] = {
 }
 
 LOG_LINES_TO_DISPLAY = 200
+DEFAULT_DCF_ASSUMPTIONS = DcfAssumptions.defaults()
+DCF_RATE_LIMIT = 50.0
+DCF_YEARS_MIN = 1
+DCF_YEARS_MAX = 20
 
 
 def _normalize_timeframe_kwargs(kwargs: Dict) -> Tuple[Tuple[str, object], ...]:
@@ -78,6 +82,65 @@ def _data_is_complete(data: Dict) -> bool:
     info = data.get("info") or {}
     history = data.get("history", pd.DataFrame())
     return bool(info) or (history is not None and not history.empty)
+
+
+def _initialize_dcf_session_state() -> None:
+    if "dcf_discount_rate_pct" not in st.session_state:
+        st.session_state["dcf_discount_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.discount_rate * 100
+    if "dcf_growth_rate_pct" not in st.session_state:
+        st.session_state["dcf_growth_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.growth_rate * 100
+    if "dcf_terminal_rate_pct" not in st.session_state:
+        st.session_state["dcf_terminal_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.terminal_growth_rate * 100
+    if "dcf_projection_years" not in st.session_state:
+        st.session_state["dcf_projection_years"] = DEFAULT_DCF_ASSUMPTIONS.projection_years
+
+
+def get_user_dcf_assumptions() -> tuple[DcfAssumptions, bool, Optional[str]]:
+    _initialize_dcf_session_state()
+    with st.sidebar.expander("DCF Assumptions", expanded=False):
+        if st.button("Reset to defaults", key="dcf_reset"):
+            st.session_state["dcf_discount_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.discount_rate * 100
+            st.session_state["dcf_growth_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.growth_rate * 100
+            st.session_state["dcf_terminal_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.terminal_growth_rate * 100
+            st.session_state["dcf_projection_years"] = DEFAULT_DCF_ASSUMPTIONS.projection_years
+
+        st.number_input(
+            "Discount Rate (%)",
+            min_value=-DCF_RATE_LIMIT,
+            max_value=DCF_RATE_LIMIT,
+            format="%.2f",
+            key="dcf_discount_rate_pct",
+        )
+        st.number_input(
+            "Growth Rate (%)",
+            min_value=-DCF_RATE_LIMIT,
+            max_value=DCF_RATE_LIMIT,
+            format="%.2f",
+            key="dcf_growth_rate_pct",
+        )
+        st.number_input(
+            "Terminal Growth Rate (%)",
+            min_value=-DCF_RATE_LIMIT,
+            max_value=DCF_RATE_LIMIT,
+            format="%.2f",
+            key="dcf_terminal_rate_pct",
+        )
+        st.number_input(
+            "Projection Years",
+            min_value=DCF_YEARS_MIN,
+            max_value=DCF_YEARS_MAX,
+            step=1,
+            key="dcf_projection_years",
+        )
+
+    assumptions = DcfAssumptions(
+        discount_rate=st.session_state["dcf_discount_rate_pct"] / 100.0,
+        growth_rate=st.session_state["dcf_growth_rate_pct"] / 100.0,
+        terminal_growth_rate=st.session_state["dcf_terminal_rate_pct"] / 100.0,
+        projection_years=int(st.session_state["dcf_projection_years"]),
+    )
+    is_valid, message = assumptions.validate()
+    return assumptions, is_valid, message
 
 
 def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
@@ -477,25 +540,24 @@ def render_cashflow_section(cashflow: pd.DataFrame):
         st.write("Free Cash Flow data not available.")
 
 
-def render_dcf_section(info: Dict, cashflow: pd.DataFrame, fundamentals: FundamentalsSnapshot, philosophy):
+def render_dcf_section(
+    info: Dict,
+    cashflow: pd.DataFrame,
+    fundamentals: FundamentalsSnapshot,
+    philosophy,
+    assumptions: DcfAssumptions,
+    default_assumptions: DcfAssumptions,
+):
     st.subheader("Intrinsic Value (DCF Model)")
     if cashflow is None or cashflow.empty:
         st.write("Insufficient data to calculate fair value.")
         return
 
-    discount_rate = philosophy.default_assumptions.get("discount_rate", 0.10)
-    growth_rate = philosophy.default_assumptions.get("growth_rate", 0.03)
-    terminal_growth_rate = philosophy.default_assumptions.get("terminal_growth_rate", 0.02)
-    projection_years = philosophy.default_assumptions.get("projection_years", 5)
-
     valuation = calculate_fair_value(
         cashflow,
         net_debt=fundamentals.net_debt,
         shares_outstanding=fundamentals.shares_outstanding,
-        discount_rate=discount_rate,
-        growth_rate=growth_rate,
-        terminal_growth_rate=terminal_growth_rate,
-        projection_years=projection_years,
+        assumptions=assumptions,
     )
     if valuation is None:
         st.write("Fair Value calculation could not be completed due to missing data.")
@@ -516,10 +578,7 @@ def render_dcf_section(info: Dict, cashflow: pd.DataFrame, fundamentals: Fundame
         cashflow,
         net_debt=fundamentals.net_debt,
         shares_outstanding=fundamentals.shares_outstanding,
-        discount_rate_base=discount_rate,
-        growth_rate_base=growth_rate,
-        terminal_growth_rate=terminal_growth_rate,
-        projection_years=projection_years,
+        assumptions=assumptions,
     )
 
     if fair_value_range:
@@ -529,14 +588,39 @@ def render_dcf_section(info: Dict, cashflow: pd.DataFrame, fundamentals: Fundame
     elif valuation.fair_value_per_share is None:
         st.info("Per-share valuation requires a reliable share count; Yahoo Finance did not supply one.")
 
+    assumption_rows = [
+        (
+            "Discount Rate",
+            format_percent(assumptions.discount_rate, 1),
+            format_percent(default_assumptions.discount_rate, 1),
+            "Yes" if assumptions.discount_rate != default_assumptions.discount_rate else "No",
+            "Cost of capital",
+        ),
+        (
+            "Growth Rate",
+            format_percent(assumptions.growth_rate, 1),
+            format_percent(default_assumptions.growth_rate, 1),
+            "Yes" if assumptions.growth_rate != default_assumptions.growth_rate else "No",
+            "Years 1-5 FCF growth",
+        ),
+        (
+            "Terminal Growth",
+            format_percent(assumptions.terminal_growth_rate, 1),
+            format_percent(default_assumptions.terminal_growth_rate, 1),
+            "Yes" if assumptions.terminal_growth_rate != default_assumptions.terminal_growth_rate else "No",
+            "Perpetual growth",
+        ),
+        (
+            "Projection Years",
+            assumptions.projection_years,
+            default_assumptions.projection_years,
+            "Yes" if assumptions.projection_years != default_assumptions.projection_years else "No",
+            "Explicit forecast horizon",
+        ),
+    ]
     assumption_df = pd.DataFrame(
-        [
-            ("Discount Rate", format_percent(discount_rate, 1), "Cost of capital"),
-            ("Growth Rate", format_percent(growth_rate, 1), "Years 1-5 FCF growth"),
-            ("Terminal Growth", format_percent(terminal_growth_rate, 1), "Perpetual growth"),
-            ("Projection Years", projection_years, "Explicit forecast horizon"),
-        ],
-        columns=["Assumption", "Value", "Notes"],
+        assumption_rows,
+        columns=["Assumption", "Value", "Default", "Changed?", "Notes"],
     )
 
     with st.expander("Assumptions & Data"):
@@ -555,6 +639,8 @@ def render_dcf_section(info: Dict, cashflow: pd.DataFrame, fundamentals: Fundame
             f"- **Balance sheet as of:** {fundamentals.balance_sheet_as_of or 'N/A'}"
             f" | **Pulled at:** {fundamentals.pulled_at}"
         )
+        if assumptions != default_assumptions:
+            st.caption("DCF assumptions differ from the defaults shown above.")
 
     st.caption("DCF outputs are scenario-based; adjust assumptions to reflect your investment case.")
 
@@ -578,6 +664,8 @@ def single_stock_analysis(philosophy, mode_description: str):
     default_timeframe = PHILOSOPHY_TIMEFRAME_DEFAULTS.get(philosophy.name, "1 Year")
     timeframe_index = TIMEFRAME_CHOICES.index(default_timeframe) if default_timeframe in TIMEFRAME_CHOICES else TIMEFRAME_CHOICES.index("1 Year")
     timeframe_option = st.sidebar.selectbox("Select Time Frame for Price History", TIMEFRAME_CHOICES, index=timeframe_index)
+
+    user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions()
 
     if not ticker:
         st.info("Enter a ticker above to load company data.")
@@ -613,7 +701,10 @@ def single_stock_analysis(philosophy, mode_description: str):
         st.info("Company fundamentals are unavailable for this ticker from Yahoo Finance.")
     render_price_section(history, info, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
-    render_dcf_section(info, cashflow, fundamentals, philosophy)
+    if assumptions_valid:
+        render_dcf_section(info, cashflow, fundamentals, philosophy, user_assumptions, DEFAULT_DCF_ASSUMPTIONS)
+    else:
+        st.error(f"DCF assumptions invalid: {assumption_error}")
     if fundamentals.warnings:
         st.warning("\n".join(fundamentals.warnings))
     render_raw_data(info)

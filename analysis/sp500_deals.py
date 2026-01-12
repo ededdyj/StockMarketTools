@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 import streamlit as st
-from models.valuation import calculate_fair_value
+from models.valuation import calculate_fair_value, DcfAssumptions
 from config.philosophies import get_philosophy
 from utils.fundamentals import extract_fundamentals
 
@@ -15,6 +15,12 @@ DCF_DISCOUNT_RATE = DCF_ASSUMPTIONS.get("discount_rate", 0.10)
 DCF_GROWTH_RATE = DCF_ASSUMPTIONS.get("growth_rate", 0.03)
 DCF_TERMINAL_GROWTH = DCF_ASSUMPTIONS.get("terminal_growth_rate", 0.02)
 DCF_PROJECTION_YEARS = DCF_ASSUMPTIONS.get("projection_years", 5)
+VALUE_DCF_ASSUMPTIONS = DcfAssumptions(
+    discount_rate=DCF_DISCOUNT_RATE,
+    growth_rate=DCF_GROWTH_RATE,
+    terminal_growth_rate=DCF_TERMINAL_GROWTH,
+    projection_years=DCF_PROJECTION_YEARS,
+)
 
 @st.cache_data(show_spinner=False)
 def get_sp500_tickers():
@@ -63,10 +69,7 @@ def analyze_sp500_deals():
                 cashflow,
                 net_debt=fundamentals.net_debt,
                 shares_outstanding=fundamentals.shares_outstanding,
-                discount_rate=DCF_DISCOUNT_RATE,
-                growth_rate=DCF_GROWTH_RATE,
-                terminal_growth_rate=DCF_TERMINAL_GROWTH,
-                projection_years=DCF_PROJECTION_YEARS,
+                assumptions=VALUE_DCF_ASSUMPTIONS,
             )
             if valuation is None:
                 continue
