@@ -1,4 +1,5 @@
-import os
+import logging
+from pathlib import Path
 from typing import List
 
 import pandas as pd
@@ -8,6 +9,10 @@ import yfinance as yf
 from models.valuation import calculate_fair_value, DcfAssumptions
 from utils.fundamentals import extract_fundamentals
 from config.philosophies import get_philosophy
+from utils.paths import DATA_DIR
+from analysis.results import BatchAnalysisResult, SkippedTicker
+
+logger = logging.getLogger(__name__)
 
 """
 Quality vs. Value Screener (CSV‑based, auto‑discover)
@@ -28,16 +33,23 @@ Quality vs. Value Screener (CSV‑based, auto‑discover)
 # 1. Discover available CSV lists at startup
 # ---------------------------------------------------------------------------
 
-def _discover_csv_paths(folder: str = "data") -> dict[str, str]:
+def _discover_csv_paths(folder=DATA_DIR) -> dict[str, str]:
     """Return a mapping {Pretty Name → full path} for every *_tickers.csv
     found in *folder*."""
     paths: dict[str, str] = {}
-    if os.path.isdir(folder):
-        for fname in os.listdir(folder):
+    if folder is None:
+        folder_path = DATA_DIR
+    else:
+        folder_path = Path(folder)
+        if not folder_path.is_absolute():
+            folder_path = Path.cwd() / folder_path
+    if folder_path.is_dir():
+        for path in folder_path.iterdir():
+            fname = path.name
             if fname.lower().endswith("_tickers.csv"):
                 key = fname[:-12]  # strip _tickers.csv
                 key = key.replace("_", " ").replace("-", " ").title()
-                paths[key] = os.path.join(folder, fname)
+                paths[key] = str(path)
     return paths
 
 CSV_PATHS = _discover_csv_paths()
@@ -98,7 +110,7 @@ def get_tickers(universe: str, uploaded_file=None) -> List[str]:
 # 3. Main Streamlit entry point
 # ---------------------------------------------------------------------------
 
-def analyze_quality_value_screener():
+def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_ASSUMPTIONS) -> BatchAnalysisResult:
     """Run the screener and return a ranked DataFrame."""
 
     # ── Sidebar UI ──────────────────────────────────────────────────────
@@ -106,7 +118,7 @@ def analyze_quality_value_screener():
     options = list(CSV_PATHS.keys())
     if not options:
         st.error("No *_tickers.csv files found in the data/ folder.")
-        return None
+        return BatchAnalysisResult(None)
 
     default_index = options.index("Dow 30") if "Dow 30" in options else 0
     universe = st.sidebar.selectbox("Choose a list of tickers", options, index=default_index)
@@ -115,10 +127,11 @@ def analyze_quality_value_screener():
     tickers = get_tickers(universe, uploaded_file)
     if not tickers:
         st.warning("No tickers found for the selected universe.")
-        return None
+        return BatchAnalysisResult(None)
 
     # ── Analysis loop ───────────────────────────────────────────────────
     results = []
+    skipped = []
     progress_bar = st.progress(0)
     total = len(tickers)
 
@@ -130,7 +143,11 @@ def analyze_quality_value_screener():
             cashflow = stock.cashflow
 
             # Skip if we cannot price the security at all
-            if current_price is None or cashflow is None or cashflow.empty:
+            if current_price is None:
+                skipped.append(SkippedTicker(ticker, "missing_price"))
+                continue
+            if cashflow is None or cashflow.empty:
+                skipped.append(SkippedTicker(ticker, "missing_cashflow"))
                 continue
 
             fundamentals = extract_fundamentals(info, stock.balance_sheet)
@@ -138,9 +155,10 @@ def analyze_quality_value_screener():
                 cashflow,
                 net_debt=fundamentals.net_debt,
                 shares_outstanding=fundamentals.shares_outstanding,
-                assumptions=SCREENER_DCF_ASSUMPTIONS,
+                assumptions=assumptions,
             )
             if valuation is None:
+                skipped.append(SkippedTicker(ticker, "valuation_failed"))
                 continue
 
             fair_value = valuation.fair_value_per_share
@@ -180,16 +198,16 @@ def analyze_quality_value_screener():
                 "Meets Growth Target": meets_growth_target,
                 "Fundamental Notes": " | ".join(fundamentals.note_tags) if fundamentals.note_tags else "",
             })
-        except Exception:
-            # Silently skip problematic tickers
-            pass
+        except Exception as exc:
+            logger.exception("Failed to analyze quality/value ticker %s", ticker)
+            skipped.append(SkippedTicker(ticker, "exception", str(exc)))
         finally:
             progress_bar.progress((i + 1) / total)
 
     df = pd.DataFrame(results)
     if df.empty:
         st.write("No valid data found for the Quality vs. Value Screener.")
-        return None
+        return BatchAnalysisResult(None, skipped)
 
     # ── Percentile‑based normalization ─────────────────────────────────
     df["Quality Score"] = df["Raw ROE"].rank(pct=True)
@@ -206,4 +224,4 @@ def analyze_quality_value_screener():
         STABILITY_WEIGHT * df["Stability Score"]
     )
 
-    return df.sort_values("Overall Score", ascending=False)
+    return BatchAnalysisResult(df.sort_values("Overall Score", ascending=False), skipped)

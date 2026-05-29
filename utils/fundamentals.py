@@ -17,6 +17,9 @@ BALANCE_SHEET_CASH_FIELDS = [
 
 BALANCE_SHEET_TOTAL_DEBT_FIELDS = [
     "Total Debt",
+]
+
+BALANCE_SHEET_NET_DEBT_FIELDS = [
     "Net Debt",
 ]
 
@@ -121,6 +124,14 @@ def _resolve_total_debt(balance_sheet: Optional[pd.DataFrame], column_label: Opt
     return long_term + short_term, "Long Term Debt + Short Term Debt"
 
 
+def _resolve_net_debt(balance_sheet: Optional[pd.DataFrame], column_label: Optional[str]) -> tuple[Optional[float], Optional[str]]:
+    for field in BALANCE_SHEET_NET_DEBT_FIELDS:
+        value = _value_from_column(balance_sheet, field, column_label)
+        if value is not None:
+            return value, field
+    return None, None
+
+
 def extract_fundamentals(info: Dict, balance_sheet: Optional[pd.DataFrame]) -> FundamentalsSnapshot:
     """Return normalized cash, debt, and share counts from Yahoo data."""
 
@@ -128,20 +139,24 @@ def extract_fundamentals(info: Dict, balance_sheet: Optional[pd.DataFrame]) -> F
     latest_column, balance_sheet_as_of = _latest_column_info(balance_sheet)
     cash, cash_source = _resolve_cash(balance_sheet, latest_column)
     total_debt, debt_source = _resolve_total_debt(balance_sheet, latest_column)
+    direct_net_debt, net_debt_source = _resolve_net_debt(balance_sheet, latest_column)
 
     if cash is None:
         warnings.append("Cash & equivalents missing; assuming 0.")
         cash = 0.0
         cash_source = None
 
-    if total_debt is None:
+    if total_debt is None and direct_net_debt is None:
         warnings.append("Total debt missing; assuming 0.")
         total_debt = 0.0
         debt_source = None
 
-    net_debt = None
-    if total_debt is not None and cash is not None:
+    if total_debt is not None:
         net_debt = total_debt - cash
+    else:
+        net_debt = direct_net_debt
+        debt_source = net_debt_source
+        total_debt = direct_net_debt + cash if direct_net_debt is not None and cash is not None else None
 
     shares_source = None
     shares = info.get("sharesOutstanding")

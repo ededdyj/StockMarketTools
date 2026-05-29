@@ -98,6 +98,8 @@ not optimized to do.
    ```bash
    git clone <repo-url>
    cd StockMarketTools
+   python -m venv .venv
+   source .venv/bin/activate
    pip install -r requirements.txt
    ```
 2. **Launch Streamlit**
@@ -107,10 +109,24 @@ not optimized to do.
 3. **Choose a philosophy and tool** from the sidebar, then enter tickers or load
    ticker lists as needed.
 
+## Running Tests
+
+With the virtual environment active:
+
+```bash
+python -m pytest -q
+```
+
+No environment variables are currently required. The app uses free Yahoo Finance
+data via `yfinance` and local CSV files in `data/`.
+
 ## Notes & Limitations
 
 - Free `yfinance` data can lag official filings and may mark risk metrics as
   `None`; the UI will label missing values clearly.
+- Yahoo Finance can throttle or omit fields for some tickers. Batch screeners
+  report skipped tickers so missing inputs are visible instead of silently
+  disappearing.
 - Balance-sheet gaps from Yahoo Finance are explicitly flagged and fall back to
   zero for modeling purposes; always cross-check before making capital
   decisions.

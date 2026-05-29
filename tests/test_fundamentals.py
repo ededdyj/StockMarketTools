@@ -36,6 +36,20 @@ def _sample_cashflow():
     return pd.DataFrame({"2024-12-31": [100.0]}, index=["Free Cash Flow"])
 
 
+def _total_debt_balance_sheet():
+    return pd.DataFrame(
+        {"2024-12-31": [25.0, 100.0]},
+        index=["Cash And Cash Equivalents", "Total Debt"],
+    )
+
+
+def _net_debt_balance_sheet():
+    return pd.DataFrame(
+        {"2024-12-31": [25.0, 75.0]},
+        index=["Cash And Cash Equivalents", "Net Debt"],
+    )
+
+
 def test_extract_fundamentals_uses_latest_balance_sheet_column():
     info = {"sharesOutstanding": 1_000_000}
     snapshot = extract_fundamentals(info, _multi_period_balance_sheet())
@@ -74,3 +88,19 @@ def test_calculate_fair_value_disables_per_share_when_shares_invalid():
 
     assert result is not None
     assert result.fair_value_per_share is None
+
+
+def test_extract_fundamentals_subtracts_cash_from_total_debt():
+    snapshot = extract_fundamentals({"sharesOutstanding": 1_000_000}, _total_debt_balance_sheet())
+
+    assert snapshot.total_debt == 100.0
+    assert snapshot.net_debt == 75.0
+    assert snapshot.debt_source == "Total Debt"
+
+
+def test_extract_fundamentals_uses_net_debt_without_subtracting_cash_twice():
+    snapshot = extract_fundamentals({"sharesOutstanding": 1_000_000}, _net_debt_balance_sheet())
+
+    assert snapshot.total_debt == 100.0
+    assert snapshot.net_debt == 75.0
+    assert snapshot.debt_source == "Net Debt"

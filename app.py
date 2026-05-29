@@ -16,6 +16,7 @@ from analysis.quality_value_screener import analyze_quality_value_screener
 from config.philosophies import get_philosophy_options, get_philosophy
 from utils.logger import get_logger, read_recent_logs
 from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
+from utils.dividends import estimate_annual_dividend_income
 
 st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
 st.title("Eddy's Stocks - Personal Financial Dashboard")
@@ -443,11 +444,12 @@ def render_dividend_section(info: Dict, philosophy_name: str):
         else:
             ex_dividend_str = "N/A"
 
-        est_dividend = None
-        if dividend_yield and current_price:
-            est_dividend = 10_000 * dividend_yield / current_price
-        elif dividend_rate and current_price:
-            est_dividend = (dividend_rate * 10_000) / current_price
+        est_dividend = estimate_annual_dividend_income(
+            10_000,
+            dividend_yield=dividend_yield,
+            dividend_rate=dividend_rate,
+            current_price=current_price,
+        )
 
         dividend_rows = [
             ("Dividend Rate", format_currency(dividend_rate), "USD/share (ttm)"),
@@ -626,9 +628,9 @@ def render_dcf_section(
     with st.expander("Assumptions & Data"):
         st.table(assumption_df)
         st.markdown(
-            "- **Net debt formula:** Total Debt"
-            f" ({fundamentals.debt_source or 'missing'}) - Cash & Equivalents"
-            f" ({fundamentals.cash_source or 'missing'}) = {format_currency(fundamentals.net_debt, 0)}"
+            f"- **Net debt source:** {fundamentals.debt_source or 'missing'}"
+            f" | Cash & Equivalents: {fundamentals.cash_source or 'missing'}"
+            f" | Net Debt: {format_currency(fundamentals.net_debt, 0)}"
         )
         st.markdown(
             f"- **Shares used:** {fundamentals.shares_source or 'Unavailable'}"
@@ -713,12 +715,16 @@ def single_stock_analysis(philosophy, mode_description: str):
 def render_sp500_deals(philosophy_name: str, mode_description: str):
     st.subheader(f"S&P 500 Deals Analysis — {philosophy_name}")
     st.caption(mode_description)
+    user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions()
+    if not assumptions_valid:
+        st.error(f"DCF assumptions invalid: {assumption_error}")
+        return
     st.markdown("""
 Fair value is estimated using a simplified DCF model that:
 
 - Pulls the most recent Free Cash Flow.
-- Projects five years of cash flow using a 3% growth assumption.
-- Applies a 2% terminal growth rate and discounts at 10%.
+- Projects cash flow using the DCF assumptions in the sidebar.
+- Applies the sidebar terminal growth and discount rates.
 - Subtracts net debt (Total Debt − Cash) to convert Enterprise Value to Equity Value.
 - Divides Equity Value by shares outstanding to arrive at a fair value per share.
 
@@ -726,7 +732,11 @@ Companies missing any of those inputs are skipped, so treat this as a
 high-level triage for traditional value ideas.
 """)
     with st.spinner("Analyzing S&P 500 companies..."):
-        sp500_df = analyze_sp500_deals()
+        sp500_result = analyze_sp500_deals(assumptions=user_assumptions)
+    sp500_df = sp500_result.dataframe
+    if sp500_result.skipped:
+        with st.expander(f"Skipped tickers ({len(sp500_result.skipped)})"):
+            st.dataframe(pd.DataFrame([skip.__dict__ for skip in sp500_result.skipped]))
     if sp500_df is not None and not sp500_df.empty:
         st.dataframe(sp500_df.reset_index(drop=True))
     else:
@@ -736,6 +746,10 @@ high-level triage for traditional value ideas.
 def render_quality_value_screener(philosophy_name: str, mode_description: str):
     st.subheader(f"Quality vs Value Screener — {philosophy_name}")
     st.caption(mode_description)
+    user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions()
+    if not assumptions_valid:
+        st.error(f"DCF assumptions invalid: {assumption_error}")
+        return
     st.markdown("""
 This screener ranks stocks using a blended scoring model:
 
@@ -748,7 +762,11 @@ Upload your own ticker list or pick one of the pre-loaded universes.
 Percentile ranks are calculated across the active universe only.
 """)
     with st.spinner("Analyzing selected/uploaded stocks for quality and value..."):
-        qv_df = analyze_quality_value_screener()
+        qv_result = analyze_quality_value_screener(assumptions=user_assumptions)
+    qv_df = qv_result.dataframe
+    if qv_result.skipped:
+        with st.expander(f"Skipped tickers ({len(qv_result.skipped)})"):
+            st.dataframe(pd.DataFrame([skip.__dict__ for skip in qv_result.skipped]))
     if qv_df is not None and not qv_df.empty:
         qv_df['Value Rank'] = qv_df['Value Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Quality Rank'] = qv_df['Quality Score'].rank(method='min', ascending=False).astype(int)
