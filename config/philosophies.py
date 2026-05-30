@@ -92,7 +92,8 @@ PHILOSOPHIES: Dict[str, InvestmentPhilosophy] = {
         default_assumptions={
             "min_revenue_growth": 0.10,
             "min_roe": 0.12,
-            "value_weight": 0.4,
+            "value_weight": 0.35,
+            "financial_health_weight": 0.15,
         },
         warnings=[
             "Growth estimates rely on trailing data, not analyst forecasts.",
@@ -167,4 +168,3 @@ def get_philosophy(name: str) -> InvestmentPhilosophy:
     """Safe lookup that defaults to Long-term Value/DCF."""
 
     return PHILOSOPHIES.get(name, PHILOSOPHIES["Long-term Value/DCF"])
-

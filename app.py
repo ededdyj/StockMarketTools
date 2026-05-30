@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 
 from data.fetcher import get_stock_data
 from models.valuation import calculate_fair_value, calculate_fair_value_range, DcfAssumptions
+from models.financial_health import calculate_financial_health, FinancialHealthResult
 from utils.charts import plot_price_history, plot_cashflow
 from analysis.sp500_deals import analyze_sp500_deals
 from analysis.quality_value_screener import analyze_quality_value_screener
@@ -497,6 +498,57 @@ def render_governance_section(info: Dict):
         st.write(info.get("irWebsite", "N/A"))
 
 
+def _format_signal_value(value) -> str:
+    if value is None or _is_nan(value):
+        return "N/A"
+    value = float(value)
+    if abs(value) < 10:
+        return f"{value:.4f}"
+    return f"{value:,.0f}"
+
+
+def render_financial_health_section(result: FinancialHealthResult):
+    st.subheader("Financial Health Score")
+    st.caption(
+        "Piotroski-style 0-9 score. Each signal earns 1 point when it passes; "
+        "missing Yahoo Finance statement fields are shown as N/A."
+    )
+
+    col_score, col_available, col_ratio = st.columns(3)
+    with col_score:
+        st.metric("Financial Health Score", f"{result.score}/{result.max_score}")
+    with col_available:
+        st.metric("Signals Available", f"{result.available_signals}/{result.max_score}")
+    with col_ratio:
+        st.metric("Score Ratio", format_percent(result.score_ratio, 1))
+
+    rows = []
+    for signal in result.signals:
+        if signal.passed is None:
+            outcome = "N/A"
+        elif signal.passed:
+            outcome = "Pass"
+        else:
+            outcome = "Fail"
+        rows.append(
+            {
+                "Category": signal.category,
+                "Signal": signal.name,
+                "Formula": signal.formula,
+                "Outcome": outcome,
+                "Point": signal.points,
+                "Latest": _format_signal_value(signal.latest_value),
+                "Comparison": _format_signal_value(signal.previous_value),
+                "Note": signal.note,
+            }
+        )
+
+    with st.expander("How the Financial Health Score is Calculated", expanded=True):
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        if result.warnings:
+            st.warning("\n".join(result.warnings))
+
+
 def render_price_section(history: pd.DataFrame, info: Dict, timeframe_option: str, timeframe_note: str):
     st.subheader(f"Price History ({timeframe_option})")
     st.caption(timeframe_note)
@@ -686,10 +738,12 @@ def single_stock_analysis(philosophy, mode_description: str):
 
     info = data.get("info", {})
     history = data.get("history", pd.DataFrame())
+    financials = data.get("financials", pd.DataFrame())
     cashflow = data.get("cashflow", pd.DataFrame())
     balance_sheet = data.get("balance_sheet")
 
     fundamentals = extract_fundamentals(info, balance_sheet)
+    financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
 
     warn_if_data_missing(info, history, cashflow, ticker)
 
@@ -701,6 +755,7 @@ def single_stock_analysis(philosophy, mode_description: str):
         render_governance_section(info)
     else:
         st.info("Company fundamentals are unavailable for this ticker from Yahoo Finance.")
+    render_financial_health_section(financial_health)
     render_price_section(history, info, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
     if assumptions_valid:
@@ -753,13 +808,16 @@ def render_quality_value_screener(philosophy_name: str, mode_description: str):
     st.markdown("""
 This screener ranks stocks using a blended scoring model:
 
-- **Value Score (40%)** — DCF discount to price.
-- **Quality Score (30%)** — Return on Equity percentile.
-- **Growth Score (20%)** — Revenue growth percentile.
+- **Value Score (35%)** — DCF discount to price.
+- **Quality Score (25%)** — Return on Equity percentile.
+- **Growth Score (15%)** — Revenue growth percentile.
 - **Stability Score (10%)** — Inverted percentile for Debt-to-Equity.
+- **Financial Health Score (15%)** — Piotroski-style score normalized to 0-1.
 
 Upload your own ticker list or pick one of the pre-loaded universes.
 Percentile ranks are calculated across the active universe only.
+The financial health details column shows which accounting signals passed,
+failed, or were unavailable from Yahoo Finance.
 """)
     with st.spinner("Analyzing selected/uploaded stocks for quality and value..."):
         qv_result = analyze_quality_value_screener(assumptions=user_assumptions)
@@ -772,6 +830,7 @@ Percentile ranks are calculated across the active universe only.
         qv_df['Quality Rank'] = qv_df['Quality Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Growth Rank'] = qv_df['Growth Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Stability Rank'] = qv_df['Stability Score'].rank(method='min', ascending=False).astype(int)
+        qv_df['Financial Health Rank'] = qv_df['Financial Health Score'].rank(method='min', ascending=False).astype(int)
         qv_df['Overall Rank'] = qv_df['Overall Score'].rank(method='min', ascending=False).astype(int)
         st.dataframe(qv_df.reset_index(drop=True))
         st.subheader("Top 20 Leaders by Value Score")
@@ -782,6 +841,8 @@ Percentile ranks are calculated across the active universe only.
         st.dataframe(qv_df.sort_values(by='Growth Rank').head(20).reset_index(drop=True))
         st.subheader("Top 20 Leaders by Stability Score")
         st.dataframe(qv_df.sort_values(by='Stability Rank').head(20).reset_index(drop=True))
+        st.subheader("Top 20 Leaders by Financial Health Score")
+        st.dataframe(qv_df.sort_values(by='Financial Health Rank').head(20).reset_index(drop=True))
         st.subheader("Top 20 Leaders by Overall Score")
         st.dataframe(qv_df.sort_values(by='Overall Rank').head(20).reset_index(drop=True))
     else:

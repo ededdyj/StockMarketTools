@@ -8,7 +8,7 @@ multiple investment philosophies. The app centralizes:
 - **S&P 500 “deal” sweeps** that batch-calc intrinsic value to find discounted
   names.
 - **Quality vs. Value screeners** that rank uploaded or preset universes by
-  value, quality, growth, and stability.
+  value, quality, growth, stability, and financial health.
 
 All data comes from the `yfinance` API and locally maintained ticker lists in
 `data/`.
@@ -67,10 +67,29 @@ not optimized to do.
     converted into percentile ranks inside the chosen universe.
   - Stability score inverts the percentile so lower leverage scores higher.
   - Overall score uses weights from the Growth-at-a-Reasonable-Price philosophy
-    (`Value` weight defaults to 40% and scales the remaining weights for Quality,
-    Growth, and Stability proportionally).
+    (`Value` 35%, `Quality` 25%, `Growth` 15%, `Stability` 10%, and
+    `Financial Health` 15% by default).
   - Boolean columns signal whether a name meets the philosophy’s ROE and revenue
     growth thresholds.
+
+- **Financial Health / Piotroski-Style Score**
+  - Single-stock mode shows a transparent 0-9 scorecard with every signal,
+    formula, pass/fail/N/A outcome, point value, latest value, and comparison
+    value.
+  - Quality vs Value Screener adds `Financial Health Raw Score`,
+    `Financial Health Available Signals`, `Financial Health Score`, and
+    `Financial Health Details`.
+  - The nine signals follow the Piotroski F-Score structure:
+    positive ROA, positive operating cash flow, improving ROA, operating cash
+    flow above net income, decreasing long-term debt ratio, improving current
+    ratio, no share dilution, improving gross margin, and improving asset
+    turnover.
+  - Missing Yahoo Finance statement fields are marked `N/A` and disclosed. The
+    normalized screener value is conservative: `FinancialHealthScore = Score / 9`
+    even when fewer than nine signals are available.
+  - This is a financial-statement quality check, not a bankruptcy model or a
+    buy/sell signal. It is less meaningful for ETFs, banks, insurers, REITs, and
+    companies with non-standard financial statements.
 
 - **Dividend/Income Metrics**
   - Forward yield, trailing dividend rate, payout ratio, ex-dividend date, and

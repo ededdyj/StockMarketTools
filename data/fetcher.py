@@ -24,11 +24,13 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
             # Pass all parameters in timeframe directly
             history = stock.history(**timeframe)
 
+        financials = stock.financials
         cashflow = stock.cashflow  # Typically a DataFrame with financial periods as columns
         balance_sheet = stock.balance_sheet
         return {
             "info": info,
             "history": history,
+            "financials": financials,
             "cashflow": cashflow,
             "balance_sheet": balance_sheet,
         }
