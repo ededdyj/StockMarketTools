@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import lru_cache
+import os
 from typing import Optional
 
 import pandas as pd
 import requests
 
+from models.financial_health import calculate_financial_health
+
 
 SEC_BASE_URL = "https://data.sec.gov"
 SEC_TICKER_URL = "https://www.sec.gov/files/company_tickers.json"
-SEC_HEADERS = {
-    "User-Agent": "StockMarketTools/1.0 github.com/ededdyj/StockMarketTools",
-    "Accept-Encoding": "gzip, deflate",
-}
+DEFAULT_SEC_USER_AGENT = "StockMarketTools ededdyj@users.noreply.github.com"
 SEC_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
 
 
@@ -66,9 +66,18 @@ CASHFLOW_CONCEPTS = {
 
 
 def _request_json(url: str) -> dict:
-    response = requests.get(url, headers=SEC_HEADERS, timeout=20)
+    response = requests.get(url, headers=sec_headers(), timeout=20)
     response.raise_for_status()
     return response.json()
+
+
+def sec_headers() -> dict[str, str]:
+    user_agent = os.environ.get("SEC_EDGAR_USER_AGENT", DEFAULT_SEC_USER_AGENT)
+    return {
+        "User-Agent": user_agent,
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "application/json",
+    }
 
 
 @lru_cache(maxsize=1)
@@ -223,6 +232,16 @@ def add_sec_fallback_to_statements(
     balance_sheet: Optional[pd.DataFrame],
     cashflow: Optional[pd.DataFrame],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str, list[str]]:
+    yahoo_health = calculate_financial_health(financials, balance_sheet, cashflow)
+    if yahoo_health.available_signals == yahoo_health.max_score:
+        return (
+            merge_statement_frame(financials, None),
+            merge_statement_frame(balance_sheet, None),
+            merge_statement_frame(cashflow, None),
+            "Yahoo Finance",
+            [],
+        )
+
     sec_statements = get_sec_financial_health_statements(ticker)
     merged_financials = merge_statement_frame(financials, sec_statements.financials)
     merged_balance_sheet = merge_statement_frame(balance_sheet, sec_statements.balance_sheet)

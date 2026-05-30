@@ -1,6 +1,6 @@
 import pandas as pd
 
-from data.sec_facts import merge_statement_frame, statements_from_companyfacts
+from data.sec_facts import add_sec_fallback_to_statements, merge_statement_frame, sec_headers, statements_from_companyfacts
 
 
 def _fact(values, unit="USD"):
@@ -82,3 +82,60 @@ def test_merge_statement_frame_preserves_yahoo_values_and_fills_missing_sec_valu
 
     assert merged.loc["Net Income", "2024-12-31"] == 120.0
     assert merged.loc["Total Revenue", "2024-12-31"] == 1000.0
+
+
+def test_add_sec_fallback_skips_sec_when_yahoo_has_all_signals(monkeypatch):
+    called = False
+
+    def fake_get_sec_financial_health_statements(ticker):
+        nonlocal called
+        called = True
+        raise AssertionError("SEC fallback should not be called")
+
+    monkeypatch.setattr(
+        "data.sec_facts.get_sec_financial_health_statements",
+        fake_get_sec_financial_health_statements,
+    )
+
+    financials = pd.DataFrame(
+        {
+            "2024-12-31": [120.0, 1_000.0, 450.0],
+            "2023-12-31": [80.0, 900.0, 360.0],
+        },
+        index=["Net Income", "Total Revenue", "Gross Profit"],
+    )
+    balance_sheet = pd.DataFrame(
+        {
+            "2024-12-31": [1_000.0, 200.0, 500.0, 250.0, 100.0],
+            "2023-12-31": [1_000.0, 250.0, 400.0, 250.0, 110.0],
+        },
+        index=[
+            "Total Assets",
+            "Long Term Debt",
+            "Current Assets",
+            "Current Liabilities",
+            "Ordinary Shares Number",
+        ],
+    )
+    cashflow = pd.DataFrame(
+        {
+            "2024-12-31": [150.0],
+            "2023-12-31": [90.0],
+        },
+        index=["Operating Cash Flow"],
+    )
+
+    _, _, _, source, warnings = add_sec_fallback_to_statements("AAPL", financials, balance_sheet, cashflow)
+
+    assert not called
+    assert source == "Yahoo Finance"
+    assert warnings == []
+
+
+def test_sec_headers_allow_configurable_user_agent(monkeypatch):
+    monkeypatch.setenv("SEC_EDGAR_USER_AGENT", "StockMarketTools Test test@example.com")
+
+    headers = sec_headers()
+
+    assert headers["User-Agent"] == "StockMarketTools Test test@example.com"
+    assert headers["Accept"] == "application/json"

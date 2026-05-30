@@ -147,6 +147,16 @@ No environment variables are currently required. The app uses free Yahoo Finance
 data via `yfinance`, free SEC EDGAR companyfacts data for U.S. filing-company
 fallbacks, and local CSV files in `data/`.
 
+Optional:
+
+```bash
+export SEC_EDGAR_USER_AGENT="Your Name your.email@example.com"
+```
+
+SEC EDGAR requests require an identifying user-agent. The app ships with a
+project default, but setting `SEC_EDGAR_USER_AGENT` to your own contact string
+is more reliable and aligns with SEC fair-access expectations.
+
 ## Notes & Limitations
 
 - Free `yfinance` data can lag official filings and may mark risk metrics as
