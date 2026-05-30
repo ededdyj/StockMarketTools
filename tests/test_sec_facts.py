@@ -1,6 +1,12 @@
 import pandas as pd
 
-from data.sec_facts import add_sec_fallback_to_statements, merge_statement_frame, sec_headers, statements_from_companyfacts
+from data.sec_facts import (
+    SecFinancialStatements,
+    add_sec_fallback_to_statements,
+    merge_statement_frame,
+    sec_headers,
+    statements_from_companyfacts,
+)
 
 
 def _fact(values, unit="USD"):
@@ -139,3 +145,19 @@ def test_sec_headers_allow_configurable_user_agent(monkeypatch):
 
     assert headers["User-Agent"] == "StockMarketTools Test test@example.com"
     assert headers["Accept"] == "application/json"
+
+
+def test_add_sec_fallback_suppresses_warning_when_sec_supplies_no_data(monkeypatch):
+    monkeypatch.setattr(
+        "data.sec_facts.get_sec_financial_health_statements",
+        lambda ticker: SecFinancialStatements(warnings=["SEC EDGAR fallback failed for AAPL: 403"]),
+    )
+
+    financials = pd.DataFrame({"2024-12-31": [120.0]}, index=["Net Income"])
+    balance_sheet = pd.DataFrame({"2024-12-31": [1_000.0]}, index=["Total Assets"])
+    cashflow = pd.DataFrame({"2024-12-31": [150.0]}, index=["Operating Cash Flow"])
+
+    _, _, _, source, warnings = add_sec_fallback_to_statements("AAPL", financials, balance_sheet, cashflow)
+
+    assert source == "Yahoo Finance"
+    assert warnings == []

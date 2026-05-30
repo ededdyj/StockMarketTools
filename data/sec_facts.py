@@ -248,7 +248,8 @@ def add_sec_fallback_to_statements(
     merged_cashflow = merge_statement_frame(cashflow, sec_statements.cashflow)
 
     source_note = "Yahoo Finance"
-    if not sec_statements.financials.empty or not sec_statements.balance_sheet.empty or not sec_statements.cashflow.empty:
+    sec_used = not sec_statements.financials.empty or not sec_statements.balance_sheet.empty or not sec_statements.cashflow.empty
+    if sec_used:
         source_note = sec_statements.source_note
 
     return (
@@ -256,5 +257,5 @@ def add_sec_fallback_to_statements(
         merged_balance_sheet,
         merged_cashflow,
         source_note,
-        sec_statements.warnings,
+        sec_statements.warnings if sec_used else [],
     )
