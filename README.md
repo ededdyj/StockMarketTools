@@ -9,6 +9,8 @@ multiple investment philosophies. The app centralizes:
   names.
 - **Quality vs. Value screeners** that rank uploaded or preset universes by
   value, quality, growth, stability, and financial health.
+- **Knowledge Map** that explains the formulas, assumptions, data sources,
+  limitations, and learning links behind each calculation-heavy feature.
 
 All data comes from the `yfinance` API and locally maintained ticker lists in
 `data/`.
@@ -31,6 +33,14 @@ the top of the dashboard so users understand what the selected tools are and are
 not optimized to do.
 
 ## Key Calculations & Assumptions
+
+- **Knowledge Map Maintenance**
+  - The app includes a dedicated Knowledge Map tool for learning and auditability.
+  - When adding a feature with financial logic, formulas, scoring, or external
+    data assumptions, update `content/knowledge_map.py` with the new concept,
+    inputs, calculations, transparency surfaces, limitations, and source links.
+  - `tests/test_knowledge_map.py` checks that each knowledge node is complete and
+    has at least one source link.
 
 - **Discounted Cash Flow (used in Single Stock and SP500 Deals)**
   - Uses the most recent Free Cash Flow from `yfinance.cashflow`.

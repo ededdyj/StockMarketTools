@@ -20,6 +20,7 @@ from config.philosophies import get_philosophy_options, get_philosophy
 from utils.logger import get_logger, read_recent_logs
 from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
 from utils.dividends import estimate_annual_dividend_income
+from content.knowledge_map import get_knowledge_nodes
 
 st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
 st.title("Eddy's Stocks - Personal Financial Dashboard")
@@ -31,6 +32,7 @@ MODE_DESCRIPTIONS: Dict[str, str] = {
     "Single Stock Analysis": "Deep dive on one ticker with metrics, cash flow, and valuation.",
     "SP500 Deals": "Run a batch DCF to surface S&P 500 names trading below intrinsic value.",
     "Quality vs Value Screener": "Rank a universe by composite quality, growth, stability, and value scores.",
+    "Knowledge Map": "Learn the assumptions, formulas, data sources, and limitations behind the app.",
 }
 
 DEFAULT_TICKERS: Dict[str, str] = {
@@ -752,6 +754,69 @@ def render_log_panel():
         st.text(log_text)
 
 
+def render_knowledge_map():
+    st.subheader("Knowledge Map")
+    st.caption(
+        "A living reference for the finance concepts, formulas, data sources, and limitations behind the app."
+    )
+
+    nodes = get_knowledge_nodes()
+    categories = ["All"] + sorted({node.category for node in nodes})
+    selected_category = st.selectbox("Filter by category", categories)
+    visible_nodes = [
+        node for node in nodes
+        if selected_category == "All" or node.category == selected_category
+    ]
+
+    overview_rows = [
+        {
+            "Topic": node.title,
+            "Category": node.category,
+            "Summary": node.summary,
+        }
+        for node in visible_nodes
+    ]
+    st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
+
+    for node in visible_nodes:
+        with st.expander(f"{node.category}: {node.title}", expanded=False):
+            st.markdown(f"**What it does:** {node.summary}")
+            st.markdown(f"**Why it matters:** {node.why_it_matters}")
+
+            col_inputs, col_calcs = st.columns(2)
+            with col_inputs:
+                st.markdown("**Inputs**")
+                st.markdown("\n".join(f"- {item}" for item in node.inputs))
+            with col_calcs:
+                st.markdown("**Calculations / Logic**")
+                st.markdown("\n".join(f"- {item}" for item in node.calculations))
+
+            col_surfaces, col_limits = st.columns(2)
+            with col_surfaces:
+                st.markdown("**Where You Can Inspect It**")
+                st.markdown("\n".join(f"- {item}" for item in node.transparency_surfaces))
+            with col_limits:
+                st.markdown("**Limitations**")
+                st.markdown("\n".join(f"- {item}" for item in node.limitations))
+
+            if node.sources:
+                st.markdown("**Learn More**")
+                source_rows = [
+                    {
+                        "Source": source.title,
+                        "Why useful": source.note,
+                        "Link": source.url,
+                    }
+                    for source in node.sources
+                ]
+                st.dataframe(
+                    pd.DataFrame(source_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"Link": st.column_config.LinkColumn("Link")},
+                )
+
+
 def single_stock_analysis(philosophy, mode_description: str):
     st.subheader(mode_description)
     default_ticker = DEFAULT_TICKERS.get(philosophy.name, "AAPL")
@@ -935,5 +1000,7 @@ elif mode == "SP500 Deals":
     render_sp500_deals(philosophy.name, MODE_DESCRIPTIONS[mode])
 elif mode == "Quality vs Value Screener":
     render_quality_value_screener(philosophy.name, MODE_DESCRIPTIONS[mode])
+elif mode == "Knowledge Map":
+    render_knowledge_map()
 
 render_log_panel()
