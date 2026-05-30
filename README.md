@@ -44,11 +44,25 @@ not optimized to do.
     per-share output if Yahoo Finance does not supply a reliable share count.
   - Confidence intervals vary discount/growth ± small bands to illustrate
     sensitivity.
-  - In single-stock mode, the sidebar exposes editable assumptions (discount
-    rate 10%, growth 3%, terminal growth 2%, projection horizon 5 years) with a
-    reset-to-defaults button. Inputs are validated so discount rate must remain
-    between -50% and 50% and greater than the terminal growth rate; invalid
-    combinations block the DCF output with an on-screen warning.
+  - In single-stock mode, the sidebar starts from dynamic ticker-specific
+    assumptions and still lets the user edit every input. A reset button restores
+    the generated defaults for the selected ticker. Inputs are validated so
+    discount rate must remain between -50% and 50% and greater than the terminal
+    growth rate; invalid combinations block the DCF output with an on-screen
+    warning.
+  - Dynamic discount-rate defaults use a WACC-style estimate:
+    `WACC = equity_weight × cost_of_equity + debt_weight × after_tax_cost_of_debt`.
+    Cost of equity uses CAPM:
+    `risk_free_rate + beta × equity_risk_premium`. Beta comes from Yahoo Finance
+    and is clamped to 0.60-2.00. Debt/equity weights use market cap and latest
+    debt when available.
+  - Dynamic growth defaults blend usable recent Free Cash Flow growth and
+    revenue growth, then clamp the result to 0%-12%. If positive growth history
+    is not usable, the app falls back to 3%.
+  - Dynamic terminal growth is capped conservatively at the minimum of the
+    long-term risk-free rate, 3%, and `discount_rate - 1%`.
+  - The DCF “Assumptions & Data” expander shows the generated value, source, and
+    formula for every dynamic assumption so the defaults remain auditable.
 
 - **Net Debt & Shares Fallbacks**
   - Cash and debt line items fall back to zero with a warning if Yahoo Finance
@@ -104,6 +118,11 @@ not optimized to do.
 
 - **Market & fundamentals:** `yfinance` (Yahoo Finance). Request timeout is set
   to 60 seconds to cope with slower responses.
+- **DCF market inputs:** the app attempts to pull the latest 10-year Treasury
+  rate from FRED (`DGS10`) and the latest parseable Damodaran implied equity
+  risk premium table. If either source is unavailable, it falls back to a 4.50%
+  risk-free rate and 5.00% mature-market equity risk premium and discloses that
+  in the assumption table.
 - **Financial health fallback:** SEC EDGAR `companyfacts` API. No API key is
   required. The adapter maps common U.S. GAAP XBRL tags for net income, revenue,
   gross profit, operating cash flow, assets, current assets/liabilities,

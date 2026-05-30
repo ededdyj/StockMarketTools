@@ -9,6 +9,8 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional
 
 from data.fetcher import get_stock_data
+from data.market_inputs import get_market_inputs
+from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assumptions
 from models.valuation import calculate_fair_value, calculate_fair_value_range, DcfAssumptions
 from models.financial_health import calculate_financial_health, FinancialHealthResult
 from utils.charts import plot_price_history, plot_cashflow
@@ -86,25 +88,33 @@ def _data_is_complete(data: Dict) -> bool:
     return bool(info) or (history is not None and not history.empty)
 
 
-def _initialize_dcf_session_state() -> None:
+def _set_dcf_session_state(assumptions: DcfAssumptions) -> None:
+    st.session_state["dcf_discount_rate_pct"] = assumptions.discount_rate * 100
+    st.session_state["dcf_growth_rate_pct"] = assumptions.growth_rate * 100
+    st.session_state["dcf_terminal_rate_pct"] = assumptions.terminal_growth_rate * 100
+    st.session_state["dcf_projection_years"] = assumptions.projection_years
+
+
+def _initialize_dcf_session_state(default_assumptions: DcfAssumptions, state_key: str) -> None:
+    if st.session_state.get("dcf_assumption_state_key") != state_key:
+        _set_dcf_session_state(default_assumptions)
+        st.session_state["dcf_assumption_state_key"] = state_key
+        return
+
     if "dcf_discount_rate_pct" not in st.session_state:
-        st.session_state["dcf_discount_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.discount_rate * 100
-    if "dcf_growth_rate_pct" not in st.session_state:
-        st.session_state["dcf_growth_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.growth_rate * 100
-    if "dcf_terminal_rate_pct" not in st.session_state:
-        st.session_state["dcf_terminal_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.terminal_growth_rate * 100
-    if "dcf_projection_years" not in st.session_state:
-        st.session_state["dcf_projection_years"] = DEFAULT_DCF_ASSUMPTIONS.projection_years
+        _set_dcf_session_state(default_assumptions)
 
 
-def get_user_dcf_assumptions() -> tuple[DcfAssumptions, bool, Optional[str]]:
-    _initialize_dcf_session_state()
+def get_user_dcf_assumptions(
+    default_assumptions: DcfAssumptions = DEFAULT_DCF_ASSUMPTIONS,
+    state_key: str = "static-default",
+    reset_label: str = "Reset to defaults",
+) -> tuple[DcfAssumptions, bool, Optional[str]]:
+    _initialize_dcf_session_state(default_assumptions, state_key)
     with st.sidebar.expander("DCF Assumptions", expanded=False):
-        if st.button("Reset to defaults", key="dcf_reset"):
-            st.session_state["dcf_discount_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.discount_rate * 100
-            st.session_state["dcf_growth_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.growth_rate * 100
-            st.session_state["dcf_terminal_rate_pct"] = DEFAULT_DCF_ASSUMPTIONS.terminal_growth_rate * 100
-            st.session_state["dcf_projection_years"] = DEFAULT_DCF_ASSUMPTIONS.projection_years
+        st.caption("Defaults may be generated from available market and company data; edit any field to stress-test your case.")
+        if st.button(reset_label, key="dcf_reset"):
+            _set_dcf_session_state(default_assumptions)
 
         st.number_input(
             "Discount Rate (%)",
@@ -342,6 +352,14 @@ def format_assumption_value(value) -> str:
     if isinstance(value, (int, float)) and value != 0 and abs(value) < 1:
         return f"{value * 100:.2f}%"
     return f"{value}"
+
+
+def format_dynamic_assumption_value(value, assumption: str) -> str:
+    if isinstance(value, float) and assumption not in {"Beta"}:
+        return format_percent(value, 2)
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
 
 
 def render_philosophy_summary(philosophy):
@@ -609,6 +627,7 @@ def render_dcf_section(
     philosophy,
     assumptions: DcfAssumptions,
     default_assumptions: DcfAssumptions,
+    dynamic_estimate: Optional[DynamicDcfEstimate] = None,
 ):
     st.subheader("Intrinsic Value (DCF Model)")
     if cashflow is None or cashflow.empty:
@@ -687,6 +706,21 @@ def render_dcf_section(
 
     with st.expander("Assumptions & Data"):
         st.table(assumption_df)
+        if dynamic_estimate:
+            dynamic_rows = [
+                {
+                    "Assumption": line.assumption,
+                    "Suggested Value": format_dynamic_assumption_value(line.value, line.assumption),
+                    "Source": line.source,
+                    "Formula": line.formula,
+                    "Note": line.note,
+                }
+                for line in dynamic_estimate.lines
+            ]
+            st.markdown("**Dynamic Default Derivation**")
+            st.dataframe(pd.DataFrame(dynamic_rows), use_container_width=True, hide_index=True)
+            if dynamic_estimate.warnings:
+                st.info("\n".join(dynamic_estimate.warnings))
         st.markdown(
             f"- **Net debt source:** {fundamentals.debt_source or 'missing'}"
             f" | Cash & Equivalents: {fundamentals.cash_source or 'missing'}"
@@ -727,8 +761,6 @@ def single_stock_analysis(philosophy, mode_description: str):
     timeframe_index = TIMEFRAME_CHOICES.index(default_timeframe) if default_timeframe in TIMEFRAME_CHOICES else TIMEFRAME_CHOICES.index("1 Year")
     timeframe_option = st.sidebar.selectbox("Select Time Frame for Price History", TIMEFRAME_CHOICES, index=timeframe_index)
 
-    user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions()
-
     if not ticker:
         st.info("Enter a ticker above to load company data.")
         return
@@ -754,6 +786,18 @@ def single_stock_analysis(philosophy, mode_description: str):
 
     fundamentals = extract_fundamentals(info, balance_sheet)
     financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
+    dynamic_dcf = estimate_dynamic_dcf_assumptions(
+        info,
+        financials,
+        balance_sheet,
+        cashflow,
+        get_market_inputs(),
+    )
+    user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions(
+        dynamic_dcf.assumptions,
+        state_key=f"single-stock:{ticker}",
+        reset_label="Reset to dynamic defaults",
+    )
 
     warn_if_data_missing(info, history, cashflow, ticker)
 
@@ -769,7 +813,15 @@ def single_stock_analysis(philosophy, mode_description: str):
     render_price_section(history, info, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
     if assumptions_valid:
-        render_dcf_section(info, cashflow, fundamentals, philosophy, user_assumptions, DEFAULT_DCF_ASSUMPTIONS)
+        render_dcf_section(
+            info,
+            cashflow,
+            fundamentals,
+            philosophy,
+            user_assumptions,
+            dynamic_dcf.assumptions,
+            dynamic_estimate=dynamic_dcf,
+        )
     else:
         st.error(f"DCF assumptions invalid: {assumption_error}")
     if fundamentals.warnings:
