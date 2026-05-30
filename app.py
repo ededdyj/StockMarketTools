@@ -21,6 +21,7 @@ from utils.logger import get_logger, read_recent_logs
 from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
 from utils.dividends import estimate_annual_dividend_income
 from content.knowledge_map import get_knowledge_nodes
+from content.research_prompt import StockResearchPromptInputs, build_stock_research_prompt
 
 st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
 st.title("Eddy's Stocks - Personal Financial Dashboard")
@@ -743,6 +744,72 @@ def render_dcf_section(
     st.caption("DCF outputs are scenario-based; adjust assumptions to reflect your investment case.")
 
 
+def render_chatgpt_prompt_export(
+    ticker: str,
+    info: Dict,
+    fundamentals: FundamentalsSnapshot,
+    financial_health: FinancialHealthResult,
+    assumptions: Optional[DcfAssumptions],
+    default_assumptions: Optional[DcfAssumptions],
+    dynamic_estimate: Optional[DynamicDcfEstimate],
+    valuation,
+    fair_value_range,
+    timeframe_option: str,
+    timeframe_note: str,
+):
+    with st.expander("ChatGPT Research Prompt Export", expanded=False):
+        st.caption(
+            "Copy or download this prompt to ask ChatGPT to research the stock using the app's "
+            "current output as structured starting context."
+        )
+        current_price = (
+            info.get("currentPrice")
+            or info.get("regularMarketPrice")
+            or info.get("previousClose")
+        )
+        prompt = build_stock_research_prompt(
+            StockResearchPromptInputs(
+                ticker=ticker,
+                company_name=info.get("longName") or info.get("shortName") or ticker,
+                sector=info.get("sector", "N/A"),
+                industry=info.get("industry", "N/A"),
+                business_summary=info.get("longBusinessSummary", ""),
+                current_price=current_price,
+                market_cap=info.get("marketCap"),
+                enterprise_value=info.get("enterpriseValue"),
+                trailing_pe=info.get("trailingPE"),
+                forward_pe=info.get("forwardPE"),
+                price_to_book=info.get("priceToBook"),
+                profit_margins=info.get("profitMargins"),
+                beta=info.get("beta"),
+                dividend_yield=info.get("dividendYield"),
+                payout_ratio=info.get("payoutRatio"),
+                fundamentals=fundamentals,
+                financial_health=financial_health,
+                assumptions=assumptions,
+                default_assumptions=default_assumptions,
+                dynamic_estimate=dynamic_estimate,
+                valuation=valuation,
+                fair_value_range=fair_value_range,
+                timeframe_label=timeframe_option,
+                timeframe_note=timeframe_note,
+            )
+        )
+
+        st.text_area(
+            "Copyable prompt",
+            value=prompt,
+            height=520,
+            help="Paste this into ChatGPT when you want a fuller research memo using current external sources.",
+        )
+        st.download_button(
+            "Download Prompt",
+            data=prompt,
+            file_name=f"{ticker.lower()}_chatgpt_research_prompt.md",
+            mime="text/markdown",
+        )
+
+
 def render_raw_data(info: Dict):
     with st.expander("Raw Data (from yfinance)"):
         st.json(info)
@@ -878,6 +945,21 @@ def single_stock_analysis(philosophy, mode_description: str):
     render_price_section(history, info, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
     if assumptions_valid:
+        prompt_valuation = None
+        prompt_fair_value_range = None
+        if cashflow is not None and not cashflow.empty:
+            prompt_valuation = calculate_fair_value(
+                cashflow,
+                net_debt=fundamentals.net_debt,
+                shares_outstanding=fundamentals.shares_outstanding,
+                assumptions=user_assumptions,
+            )
+            prompt_fair_value_range = calculate_fair_value_range(
+                cashflow,
+                net_debt=fundamentals.net_debt,
+                shares_outstanding=fundamentals.shares_outstanding,
+                assumptions=user_assumptions,
+            )
         render_dcf_section(
             info,
             cashflow,
@@ -886,6 +968,19 @@ def single_stock_analysis(philosophy, mode_description: str):
             user_assumptions,
             dynamic_dcf.assumptions,
             dynamic_estimate=dynamic_dcf,
+        )
+        render_chatgpt_prompt_export(
+            ticker,
+            info,
+            fundamentals,
+            financial_health,
+            user_assumptions,
+            dynamic_dcf.assumptions,
+            dynamic_dcf,
+            prompt_valuation,
+            prompt_fair_value_range,
+            timeframe_option,
+            timeframe_note,
         )
     else:
         st.error(f"DCF assumptions invalid: {assumption_error}")

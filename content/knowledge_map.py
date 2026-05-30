@@ -268,6 +268,59 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
     ),
     KnowledgeNode(
+        title="ChatGPT Research Prompt Export",
+        category="Research Workflow",
+        summary=(
+            "Packages the single-stock dashboard output into a structured prompt for deeper "
+            "external research and independent fair-value review."
+        ),
+        why_it_matters=(
+            "The app can calculate a transparent starting valuation, but a complete investment "
+            "review also needs current filings, management commentary, industry context, and "
+            "risks that are not fully captured by Yahoo Finance fields."
+        ),
+        inputs=[
+            "Company profile, sector, industry, and business summary from Yahoo Finance",
+            "Market snapshot metrics such as price, market cap, valuation multiples, beta, and dividends",
+            "DCF fair value estimate, sensitivity range, net debt, shares, and active assumptions",
+            "Dynamic default derivation table and warnings",
+            "Financial health score and all pass/fail/N/A accounting signals",
+        ],
+        calculations=[
+            "Prompt upside/downside = (app fair value per share - current price) / current price",
+            "Prompt preserves the same DCF assumptions and health-score results shown on the page",
+            "Research checklist asks ChatGPT to verify the app estimate against filings, earnings, guidance, risks, and industry context",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > ChatGPT Research Prompt Export",
+            "Copyable prompt text area",
+            "Markdown download button",
+            "Prompt includes app limitations and asks ChatGPT to separate facts, estimates, and assumptions",
+        ],
+        limitations=[
+            "The export itself does not browse the web or validate current events.",
+            "Generated research quality depends on the model and sources used after the prompt is pasted.",
+            "Users still need to verify cited sources and assumptions before making decisions.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "SEC investor guide to company filings",
+                "https://www.investor.gov/introduction-investing/getting-started/researching-investments/how-read-10-k10-q",
+                "Explains how investors can use 10-K and 10-Q filings for company research.",
+            ),
+            KnowledgeSource(
+                "SEC EDGAR company search",
+                "https://www.sec.gov/edgar/search/",
+                "Primary source for company filings that a research prompt should ask ChatGPT to check.",
+            ),
+            KnowledgeSource(
+                "SEC investor guide to analyst reports",
+                "https://www.investor.gov/introduction-investing/getting-started/researching-investments/analyst-reports",
+                "Useful reminder that analyst views are estimates and should be compared against primary sources.",
+            ),
+        ],
+    ),
+    KnowledgeNode(
         title="Data Sources and Fallbacks",
         category="Data Reliability",
         summary=(

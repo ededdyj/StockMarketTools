@@ -5,6 +5,9 @@ multiple investment philosophies. The app centralizes:
 
 - **Single-stock deep dives** with profile data, dividend safety, FCF charts, and
   DCF fair value ranges.
+- **ChatGPT research prompt exports** that package the single-stock analysis
+  output into a copyable prompt for deeper external research and fair-value
+  review.
 - **S&P 500 “deal” sweeps** that batch-calc intrinsic value to find discounted
   names.
 - **Quality vs. Value screeners** that rank uploaded or preset universes by
@@ -123,6 +126,18 @@ not optimized to do.
     estimated annual cash on $10,000 are shown in USD.
   - Dividends are based on trailing twelve months; confirm payout schedules for
     ADRs or special distributions.
+
+- **ChatGPT Research Prompt Export**
+  - Single Stock Analysis includes a copyable/downloadable prompt after the DCF
+    output.
+  - The prompt includes company context, current market metrics, the app's DCF
+    fair value estimate, sensitivity range, active assumptions, dynamic default
+    derivation, financial health score, and known app limitations.
+  - The prompt instructs ChatGPT to research current filings, earnings releases,
+    guidance, news, competitive position, industry conditions, capital returns,
+    debt maturities, dilution, and other factors that could change valuation.
+  - This feature does not make an external API call; it packages the app's local
+    output so a user can paste it into ChatGPT or another research workflow.
 
 ## Data Sources & Caching
 
