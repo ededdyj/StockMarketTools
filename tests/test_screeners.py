@@ -100,6 +100,17 @@ def test_quality_value_screener_includes_financial_health(monkeypatch):
     monkeypatch.setattr(quality_value_screener.yf, "Ticker", lambda ticker: _Stock())
     monkeypatch.setattr(
         quality_value_screener,
+        "add_sec_fallback_to_statements",
+        lambda ticker, financials, balance_sheet, cashflow: (
+            financials,
+            balance_sheet,
+            cashflow,
+            "Yahoo Finance",
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        quality_value_screener,
         "calculate_fair_value",
         lambda *args, **kwargs: SimpleNamespace(fair_value_per_share=15.0),
     )

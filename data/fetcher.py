@@ -1,6 +1,8 @@
 import yfinance as yf
 import pandas as pd
 
+from data.sec_facts import add_sec_fallback_to_statements
+
 def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
     """
     Fetches stock information, historical price data (including intraday data), and cash flow data for a given ticker.
@@ -27,12 +29,21 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
         financials = stock.financials
         cashflow = stock.cashflow  # Typically a DataFrame with financial periods as columns
         balance_sheet = stock.balance_sheet
+        (
+            financials,
+            balance_sheet,
+            cashflow,
+            financial_health_source,
+            sec_warnings,
+        ) = add_sec_fallback_to_statements(ticker, financials, balance_sheet, cashflow)
         return {
             "info": info,
             "history": history,
             "financials": financials,
             "cashflow": cashflow,
             "balance_sheet": balance_sheet,
+            "financial_health_source": financial_health_source,
+            "sec_warnings": sec_warnings,
         }
     except Exception as e:
         print(f"Error fetching data for {ticker}: {e}")

@@ -74,8 +74,8 @@ not optimized to do.
 
 - **Financial Health / Piotroski-Style Score**
   - Single-stock mode shows a transparent 0-9 scorecard with every signal,
-    formula, pass/fail/N/A outcome, point value, latest value, and comparison
-    value.
+    formula, pass/fail/N/A outcome, point value, source, latest value, and
+    comparison value.
   - Quality vs Value Screener adds `Financial Health Raw Score`,
     `Financial Health Available Signals`, `Financial Health Score`, and
     `Financial Health Details`.
@@ -84,9 +84,12 @@ not optimized to do.
     flow above net income, decreasing long-term debt ratio, improving current
     ratio, no share dilution, improving gross margin, and improving asset
     turnover.
-  - Missing Yahoo Finance statement fields are marked `N/A` and disclosed. The
-    normalized screener value is conservative: `FinancialHealthScore = Score / 9`
-    even when fewer than nine signals are available.
+  - The app first uses `yfinance` statement data, then fills missing financial
+    health fields from the SEC EDGAR `companyfacts` API when a U.S. ticker maps
+    to a CIK. Missing fields after both sources are marked `N/A` and disclosed.
+    The normalized screener value is conservative:
+    `FinancialHealthScore = Score / 9` even when fewer than nine signals are
+    available.
   - This is a financial-statement quality check, not a bankruptcy model or a
     buy/sell signal. It is less meaningful for ETFs, banks, insurers, REITs, and
     companies with non-standard financial statements.
@@ -101,6 +104,10 @@ not optimized to do.
 
 - **Market & fundamentals:** `yfinance` (Yahoo Finance). Request timeout is set
   to 60 seconds to cope with slower responses.
+- **Financial health fallback:** SEC EDGAR `companyfacts` API. No API key is
+  required. The adapter maps common U.S. GAAP XBRL tags for net income, revenue,
+  gross profit, operating cash flow, assets, current assets/liabilities,
+  long-term debt, and shares outstanding into the app's financial health model.
 - **Ticker universes:** CSV files in `data/` (`*_tickers.csv`) for S&P 500, Dow
   30, Nasdaq 100, Dividend Aristocrats, etc. You can add new universes by
   dropping additional CSVs in that folder.
@@ -137,7 +144,8 @@ python -m pytest -q
 ```
 
 No environment variables are currently required. The app uses free Yahoo Finance
-data via `yfinance` and local CSV files in `data/`.
+data via `yfinance`, free SEC EDGAR companyfacts data for U.S. filing-company
+fallbacks, and local CSV files in `data/`.
 
 ## Notes & Limitations
 
@@ -146,6 +154,9 @@ data via `yfinance` and local CSV files in `data/`.
 - Yahoo Finance can throttle or omit fields for some tickers. Batch screeners
   report skipped tickers so missing inputs are visible instead of silently
   disappearing.
+- SEC EDGAR fallback only covers companies with SEC CIK mappings and usable
+  XBRL facts. It will not fully cover ETFs, many ADRs, and some companies with
+  non-standard or custom filing tags.
 - Balance-sheet gaps from Yahoo Finance are explicitly flagged and fall back to
   zero for modeling purposes; always cross-check before making capital
   decisions.

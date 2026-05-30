@@ -11,6 +11,7 @@ from models.financial_health import calculate_financial_health
 from utils.fundamentals import extract_fundamentals
 from config.philosophies import get_philosophy
 from utils.paths import DATA_DIR
+from data.sec_facts import add_sec_fallback_to_statements
 from analysis.results import BatchAnalysisResult, SkippedTicker
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,7 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
             current_price = info.get("currentPrice") or info.get("regularMarketPrice")
             financials = stock.financials
             cashflow = stock.cashflow
+            balance_sheet = stock.balance_sheet
 
             # Skip if we cannot price the security at all
             if current_price is None:
@@ -154,8 +156,15 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
                 skipped.append(SkippedTicker(ticker, "missing_cashflow"))
                 continue
 
-            fundamentals = extract_fundamentals(info, stock.balance_sheet)
-            financial_health = calculate_financial_health(financials, stock.balance_sheet, cashflow)
+            (
+                health_financials,
+                health_balance_sheet,
+                health_cashflow,
+                financial_health_source,
+                sec_warnings,
+            ) = add_sec_fallback_to_statements(ticker, financials, balance_sheet, cashflow)
+            fundamentals = extract_fundamentals(info, balance_sheet)
+            financial_health = calculate_financial_health(health_financials, health_balance_sheet, health_cashflow)
             valuation = calculate_fair_value(
                 cashflow,
                 net_debt=fundamentals.net_debt,
@@ -198,6 +207,7 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
                 "Financial Health Raw Score": financial_health.score,
                 "Financial Health Available Signals": financial_health.available_signals,
                 "Financial Health Score": financial_health.score_ratio,
+                "Financial Health Source": financial_health_source,
                 "Net Debt": fundamentals.net_debt,
                 "Raw ROE": roe,
                 "Raw Revenue Growth": rev_growth,
@@ -208,7 +218,9 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
                     f"{signal.name}: {'N/A' if signal.passed is None else 'Pass' if signal.passed else 'Fail'}"
                     for signal in financial_health.signals
                 ),
-                "Fundamental Notes": " | ".join(fundamentals.note_tags) if fundamentals.note_tags else "",
+                "Fundamental Notes": " | ".join(
+                    [*fundamentals.note_tags, *sec_warnings]
+                ) if fundamentals.note_tags or sec_warnings else "",
             })
         except Exception as exc:
             logger.exception("Failed to analyze quality/value ticker %s", ticker)

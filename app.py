@@ -507,7 +507,11 @@ def _format_signal_value(value) -> str:
     return f"{value:,.0f}"
 
 
-def render_financial_health_section(result: FinancialHealthResult):
+def render_financial_health_section(
+    result: FinancialHealthResult,
+    source_note: str = "Yahoo Finance",
+    source_warnings: Optional[List[str]] = None,
+):
     st.subheader("Financial Health Score")
     st.caption(
         "Piotroski-style 0-9 score. Each signal earns 1 point when it passes; "
@@ -537,6 +541,7 @@ def render_financial_health_section(result: FinancialHealthResult):
                 "Formula": signal.formula,
                 "Outcome": outcome,
                 "Point": signal.points,
+                "Source": source_note if signal.passed is not None else "Unavailable",
                 "Latest": _format_signal_value(signal.latest_value),
                 "Comparison": _format_signal_value(signal.previous_value),
                 "Note": signal.note,
@@ -545,6 +550,9 @@ def render_financial_health_section(result: FinancialHealthResult):
 
     with st.expander("How the Financial Health Score is Calculated", expanded=True):
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.caption(f"Statement data source: {source_note}.")
+        if source_warnings:
+            st.info("\n".join(source_warnings))
         if result.warnings:
             st.warning("\n".join(result.warnings))
 
@@ -741,6 +749,8 @@ def single_stock_analysis(philosophy, mode_description: str):
     financials = data.get("financials", pd.DataFrame())
     cashflow = data.get("cashflow", pd.DataFrame())
     balance_sheet = data.get("balance_sheet")
+    financial_health_source = data.get("financial_health_source", "Yahoo Finance")
+    sec_warnings = data.get("sec_warnings", [])
 
     fundamentals = extract_fundamentals(info, balance_sheet)
     financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
@@ -755,7 +765,7 @@ def single_stock_analysis(philosophy, mode_description: str):
         render_governance_section(info)
     else:
         st.info("Company fundamentals are unavailable for this ticker from Yahoo Finance.")
-    render_financial_health_section(financial_health)
+    render_financial_health_section(financial_health, financial_health_source, sec_warnings)
     render_price_section(history, info, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
     if assumptions_valid:

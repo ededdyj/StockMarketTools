@@ -254,7 +254,7 @@ def calculate_financial_health(
 
     missing_count = sum(signal.passed is None for signal in signals)
     if missing_count:
-        warnings.append(f"{missing_count} of 9 financial health signals are unavailable from Yahoo Finance data.")
+        warnings.append(f"{missing_count} of 9 financial health signals are unavailable from statement data.")
 
     return FinancialHealthResult(
         score=sum(signal.points for signal in signals),
