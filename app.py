@@ -33,7 +33,7 @@ from analysis.quality_value_screener import analyze_quality_value_screener
 from config.philosophies import get_philosophy_options, get_philosophy
 from utils.logger import get_logger, read_recent_logs
 from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
-from utils.dividends import estimate_annual_dividend_income
+from utils.dividends import estimate_annual_dividend_income, resolve_dividend_yield
 from content.knowledge_map import get_knowledge_nodes
 from content.research_prompt import StockResearchPromptInputs, build_stock_research_prompt
 
@@ -546,6 +546,12 @@ def render_dividend_section(info: Dict, philosophy_name: str):
         payout_ratio = info.get("payoutRatio")
         ex_dividend_date = info.get("exDividendDate")
         current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+        dividend_yield_resolution = resolve_dividend_yield(
+            dividend_yield=dividend_yield,
+            dividend_rate=dividend_rate,
+            current_price=current_price,
+            trailing_annual_dividend_yield=info.get("trailingAnnualDividendYield"),
+        )
 
         if ex_dividend_date:
             ex_dividend_str = pd.to_datetime(ex_dividend_date, unit="s").strftime("%Y-%m-%d")
@@ -561,7 +567,7 @@ def render_dividend_section(info: Dict, philosophy_name: str):
 
         dividend_rows = [
             ("Dividend Rate", format_currency(dividend_rate), "USD/share (ttm)"),
-            ("Dividend Yield", format_percent(dividend_yield), "Forward yield"),
+            ("Dividend Yield", format_percent(dividend_yield_resolution.value), dividend_yield_resolution.source),
             ("Payout Ratio", format_percent(payout_ratio), "FCF or earnings-based"),
             ("Ex-Dividend Date", ex_dividend_str, "Next eligible record date"),
             (
@@ -572,6 +578,8 @@ def render_dividend_section(info: Dict, philosophy_name: str):
         ]
         df_dividend = pd.DataFrame(dividend_rows, columns=["Dividend Metric", "Value", "Units/Notes"])
         st.table(df_dividend)
+        if dividend_yield_resolution.warning:
+            st.info(dividend_yield_resolution.warning)
         if "Dividend" in philosophy_name:
             st.info("Yield targets and payout safety drive this philosophy; validate dividend histories externally.")
 
@@ -1095,7 +1103,12 @@ def render_chatgpt_prompt_export(
                 price_to_book=info.get("priceToBook"),
                 profit_margins=info.get("profitMargins"),
                 beta=info.get("beta"),
-                dividend_yield=info.get("dividendYield"),
+                dividend_yield=resolve_dividend_yield(
+                    dividend_yield=info.get("dividendYield"),
+                    dividend_rate=info.get("dividendRate") or info.get("trailingAnnualDividendRate"),
+                    current_price=current_price,
+                    trailing_annual_dividend_yield=info.get("trailingAnnualDividendYield"),
+                ).value,
                 payout_ratio=info.get("payoutRatio"),
                 fundamentals=fundamentals,
                 financial_health=financial_health,

@@ -11,6 +11,7 @@ import pandas as pd
 from models.dcf_assumptions import DynamicDcfEstimate
 from models.free_cash_flow import FreeCashFlowSnapshot
 from models.valuation import DcfAssumptions
+from utils.dividends import resolve_dividend_yield
 from utils.fundamentals import FundamentalsSnapshot
 
 
@@ -69,9 +70,16 @@ def generate_dcf_warnings(
 ) -> list[DcfWarning]:
     warnings: list[DcfWarning] = []
 
-    dividend_yield = info.get("dividendYield")
-    if dividend_yield is not None and dividend_yield > 0.15:
-        _add(warnings, "High", "Dividend", f"Dividend yield is {dividend_yield:.1%}, above the 15% data-quality threshold.")
+    dividend_yield_resolution = resolve_dividend_yield(
+        dividend_yield=info.get("dividendYield"),
+        dividend_rate=info.get("dividendRate") or info.get("trailingAnnualDividendRate"),
+        current_price=info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"),
+        trailing_annual_dividend_yield=info.get("trailingAnnualDividendYield"),
+    )
+    if dividend_yield_resolution.warning:
+        _add(warnings, "Low", "Dividend", dividend_yield_resolution.warning)
+    if dividend_yield_resolution.value is not None and dividend_yield_resolution.value > 0.15:
+        _add(warnings, "High", "Dividend", f"Dividend yield is {dividend_yield_resolution.value:.1%}, above the 15% data-quality threshold.")
 
     payout_ratio = info.get("payoutRatio")
     if payout_ratio is not None and payout_ratio > 1:
