@@ -111,6 +111,22 @@ not optimized to do.
     price, market cap, shares used, implied shares, cash, debt, net debt,
     operating cash flow, capex, FCF, revenue, beta, risk-free rate, equity risk
     premium, WACC/discount rate, explicit growth, and terminal growth.
+  - Valuation input provenance separates market snapshots, official filing data,
+    derived estimates, and fallback estimates. Each major input shows value,
+    source, formula, period/as-of date, retrieval timestamp, confidence, and
+    freshness label.
+  - Data freshness labels are: Fresh (0-45 days), Recent (46-120 days), Stale
+    (121-365 days), Very stale (over 365 days), and Unknown.
+  - Single-stock mode shows a compact Data Timing & Freshness summary and warns
+    when current market data is mixed with annual financial statement data older
+    than 120 days.
+  - DCF Fit labels the model suitability as High, Medium, or Low based on FCF
+    availability, warning severity, share reliability, fallbacks, and whether the
+    company type often requires a specialized model.
+  - Companies with large debt relative to market cap, financing operations, or
+    financing receivables trigger a warning that net debt may overstate the
+    economic debt deduction. The app discloses this risk but does not
+    automatically adjust debt.
 
 - **Value Score (Quality vs Value Screener)**
   - `ValueScore = max((FairValue - Price) / FairValue, 0)`.
@@ -165,6 +181,12 @@ not optimized to do.
   - The prompt instructs ChatGPT to research current filings, earnings releases,
     guidance, news, competitive position, industry conditions, capital returns,
     debt maturities, dilution, and other factors that could change valuation.
+  - The prompt includes a “Research Checklist for External Verification” covering
+    latest SEC filings, earnings releases, investor presentations, guidance,
+    segment trends, margin drivers, working capital, capex, debt maturities,
+    financing debt, buybacks, dividends, legal/regulatory risks, macro
+    sensitivity, competitive threats, analyst expectations, and evidence that
+    would change the valuation.
   - This feature does not make an external API call; it packages the app's local
     output so a user can paste it into ChatGPT or another research workflow.
 

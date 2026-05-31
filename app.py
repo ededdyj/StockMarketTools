@@ -10,9 +10,11 @@ from typing import Dict, List, Tuple, Optional
 
 from data.fetcher import get_stock_data
 from data.market_inputs import get_market_inputs
+from models.dcf_fit import DcfFitResult, calculate_dcf_fit
 from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assumptions
 from models.dcf_warnings import DcfWarning, generate_dcf_warnings
 from models.free_cash_flow import FreeCashFlowSnapshot, resolve_free_cash_flow
+from models.provenance import DataFreshnessReport, build_valuation_input_provenance
 from models.valuation import (
     DcfAssumptions,
     ScenarioValuation,
@@ -735,6 +737,41 @@ def render_dcf_warnings(warnings: list[DcfWarning]):
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+def render_data_freshness_summary(report: DataFreshnessReport):
+    st.subheader("Data Timing & Freshness")
+    st.caption(
+        "Market prices can be current while financial statements are quarterly or annual. "
+        "Treat timing mismatches as part of the valuation risk."
+    )
+    key_names = {"Current Price", "Balance Sheet", "Free Cash Flow", "Shares Used", "Risk-free Rate", "Equity Risk Premium"}
+    summary_rows = [
+        {
+            "Input": row.name,
+            "As-of / Period": row.period_or_as_of or "N/A",
+            "Age": f"{row.age_days} days" if row.age_days is not None else "Unknown",
+            "Freshness": row.freshness_label,
+            "Source": row.source,
+        }
+        for row in report.rows
+        if row.name in key_names
+    ]
+    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    if report.warnings:
+        st.warning("\n".join(report.warnings))
+
+
+def render_dcf_fit(fit: DcfFitResult):
+    st.subheader("DCF Fit")
+    col_label, col_score = st.columns(2)
+    with col_label:
+        st.metric("DCF Suitability", fit.label)
+    with col_score:
+        st.metric("Fit Score", f"{fit.score}/100")
+    with st.expander("Why this DCF fit label?"):
+        st.markdown("\n".join(f"- {reason}" for reason in fit.reasons))
+        st.caption("This label helps interpret the model. It is not a buy/sell signal.")
+
+
 def render_equity_bridge(valuation: ValuationResult, fundamentals: FundamentalsSnapshot):
     projected_rows = [
         {
@@ -827,6 +864,7 @@ def render_scenario_section(scenarios: list[ScenarioValuation]):
         rows.append(
             {
                 "Scenario": scenario.name,
+                "Qualitative Case": scenario.thesis,
                 "Starting FCF": format_currency(valuation.starting_fcf, 0) if valuation else "N/A",
                 "Growth": format_percent(scenario.assumptions.growth_rate, 1),
                 "Discount": format_percent(scenario.assumptions.discount_rate, 1),
@@ -861,49 +899,22 @@ def render_sensitivity_section(sensitivity: pd.DataFrame):
 
 
 def render_source_metadata(
-    info: Dict,
-    fundamentals: FundamentalsSnapshot,
-    fcf_snapshot: FreeCashFlowSnapshot,
-    dynamic_estimate: Optional[DynamicDcfEstimate],
+    provenance_report: DataFreshnessReport,
 ):
-    metadata_rows = [
-        ("Current Price", info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"), "Yahoo Finance profile/history", "Latest market snapshot", "currentPrice / regularMarketPrice / previousClose"),
-        ("Market Cap", info.get("marketCap"), "Yahoo Finance profile", "Latest market snapshot", "marketCap"),
-        ("Shares Used", fundamentals.shares_outstanding, fundamentals.shares_source or "Unavailable", fundamentals.shares_date_or_period or "N/A", "Share-count resolver"),
-        ("Implied Shares", fundamentals.implied_shares_from_market_cap, "Computed", "Latest market snapshot", "marketCap / currentPrice"),
-        ("Cash and Equivalents", fundamentals.cash_and_equivalents, fundamentals.cash_source or "Fallback", fundamentals.balance_sheet_as_of or "N/A", "Latest balance-sheet cash field"),
-        ("Short-Term Debt", fundamentals.short_term_debt, "Yahoo Finance balance sheet", fundamentals.balance_sheet_as_of or "N/A", "Short/current debt field"),
-        ("Long-Term Debt", fundamentals.long_term_debt, "Yahoo Finance balance sheet", fundamentals.balance_sheet_as_of or "N/A", "Long-term debt field"),
-        ("Total Debt", fundamentals.total_debt, fundamentals.debt_source or "Fallback", fundamentals.balance_sheet_as_of or "N/A", "Total Debt or Short + Long Debt"),
-        ("Net Debt", fundamentals.net_debt, "Computed", fundamentals.balance_sheet_as_of or "N/A", "Total debt - cash and equivalents"),
-        ("Operating Cash Flow", fcf_snapshot.operating_cash_flow, fcf_snapshot.source, fcf_snapshot.period or "N/A", "Cash flow statement operating cash flow"),
-        ("Capital Expenditures", fcf_snapshot.capital_expenditures, fcf_snapshot.source, fcf_snapshot.period or "N/A", "Capex treated as positive outflow"),
-        ("Free Cash Flow", fcf_snapshot.value, fcf_snapshot.source, fcf_snapshot.period or "N/A", fcf_snapshot.formula),
-        ("Revenue", info.get("totalRevenue"), "Yahoo Finance profile", "TTM/profile field", "totalRevenue"),
-        ("Beta", info.get("beta"), "Yahoo Finance profile", "Latest profile field", "beta"),
-    ]
-    if dynamic_estimate:
-        for line in dynamic_estimate.lines:
-            if line.assumption in {
-                "Risk-free rate",
-                "Equity risk premium",
-                "Pretax cost of debt",
-                "Tax rate",
-                "Discount rate",
-                "Growth rate",
-                "Terminal growth",
-            }:
-                metadata_rows.append((line.assumption, line.value, line.source, "Latest available", line.formula))
-
     rows = [
         {
-            "Input": name,
-            "Value": str(format_currency(value, 0) if isinstance(value, (int, float)) and abs(value) > 10 else format_ratio(value)),
-            "Source": source,
-            "Date / Period": period,
-            "Formula / Derivation": formula,
+            "Input": row.name,
+            "Value": str(format_currency(row.value, 0) if isinstance(row.value, (int, float)) and abs(row.value) > 10 else format_ratio(row.value)),
+            "Category": row.category,
+            "Source": row.source,
+            "Date / Period": row.period_or_as_of or "N/A",
+            "Freshness": row.freshness_label,
+            "Age": f"{row.age_days} days" if row.age_days is not None else "Unknown",
+            "Confidence": row.confidence,
+            "Formula / Derivation": row.formula,
+            "Warning": row.warning or "",
         }
-        for name, value, source, period, formula in metadata_rows
+        for row in provenance_report.rows
     ]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -919,6 +930,8 @@ def render_dcf_section(
     fair_value_range,
     fcf_snapshot: FreeCashFlowSnapshot,
     dcf_warnings: list[DcfWarning],
+    dcf_fit: DcfFitResult,
+    provenance_report: DataFreshnessReport,
     scenarios: list[ScenarioValuation],
     sensitivity: pd.DataFrame,
     reverse_dcf,
@@ -930,6 +943,7 @@ def render_dcf_section(
         render_dcf_warnings(dcf_warnings)
         return
 
+    render_dcf_fit(dcf_fit)
     render_dcf_warnings(dcf_warnings)
 
     cards = [
@@ -994,8 +1008,8 @@ def render_dcf_section(
 
     with st.expander("Assumptions & Data"):
         st.table(assumption_df)
-        st.markdown("**Source Metadata for Major Valuation Inputs**")
-        render_source_metadata(info, fundamentals, fcf_snapshot, dynamic_estimate)
+        st.markdown("**Source Metadata and Freshness for Major Valuation Inputs**")
+        render_source_metadata(provenance_report)
         if dynamic_estimate:
             dynamic_rows = [
                 {
@@ -1043,6 +1057,8 @@ def render_chatgpt_prompt_export(
     fair_value_range,
     fcf_snapshot: Optional[FreeCashFlowSnapshot],
     dcf_warnings: list[DcfWarning],
+    dcf_fit: DcfFitResult,
+    provenance_report: DataFreshnessReport,
     scenarios: list[ScenarioValuation],
     sensitivity: pd.DataFrame,
     reverse_dcf,
@@ -1085,6 +1101,8 @@ def render_chatgpt_prompt_export(
                 fair_value_range=fair_value_range,
                 fcf_snapshot=fcf_snapshot,
                 dcf_warnings=dcf_warnings,
+                dcf_fit=dcf_fit,
+                provenance_report=provenance_report,
                 scenarios=scenarios,
                 sensitivity_table=sensitivity,
                 reverse_dcf=reverse_dcf,
@@ -1215,12 +1233,13 @@ def single_stock_analysis(philosophy, mode_description: str):
 
     fundamentals = extract_fundamentals(info, balance_sheet, financials=financials)
     financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
+    market_inputs = get_market_inputs()
     dynamic_dcf = estimate_dynamic_dcf_assumptions(
         info,
         financials,
         balance_sheet,
         cashflow,
-        get_market_inputs(),
+        market_inputs,
     )
     user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions(
         dynamic_dcf.assumptions,
@@ -1306,6 +1325,16 @@ def single_stock_analysis(philosophy, mode_description: str):
             sec_warnings=sec_warnings,
             philosophy_name=philosophy.name,
         )
+        provenance_report = build_valuation_input_provenance(
+            info,
+            fundamentals,
+            fcf_snapshot,
+            dynamic_dcf,
+            market_inputs,
+            financials=financials,
+        )
+        dcf_fit = calculate_dcf_fit(info, fundamentals, fcf_snapshot, dcf_warnings)
+        render_data_freshness_summary(provenance_report)
         render_dcf_section(
             info,
             cashflow,
@@ -1317,6 +1346,8 @@ def single_stock_analysis(philosophy, mode_description: str):
             prompt_fair_value_range,
             fcf_snapshot,
             dcf_warnings,
+            dcf_fit,
+            provenance_report,
             scenarios,
             sensitivity,
             reverse_dcf,
@@ -1334,6 +1365,8 @@ def single_stock_analysis(philosophy, mode_description: str):
             prompt_fair_value_range,
             fcf_snapshot,
             dcf_warnings,
+            dcf_fit,
+            provenance_report,
             scenarios,
             sensitivity,
             reverse_dcf,

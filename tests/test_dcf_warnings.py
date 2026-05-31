@@ -58,3 +58,36 @@ def test_generate_dcf_warnings_flags_share_mismatch():
     )
 
     assert any(warning.category == "Shares" for warning in warnings)
+
+
+def test_generate_dcf_warnings_flags_financing_debt_risk():
+    info = {
+        "sharesOutstanding": 100_000_000,
+        "marketCap": 1_000_000_000,
+        "currentPrice": 10,
+        "longBusinessSummary": "The company provides financial services and financing receivables to customers.",
+    }
+    fundamentals = extract_fundamentals(
+        info,
+        pd.DataFrame(
+            {"2026-01-31": [100_000_000, 900_000_000]},
+            index=["Cash And Cash Equivalents", "Total Debt"],
+        ),
+    )
+    fcf = FreeCashFlowSnapshot(
+        value=1_000.0,
+        source="Test",
+        period="2026-01-31",
+        formula="Free cash flow = operating cash flow - abs(capex)",
+    )
+
+    warnings = generate_dcf_warnings(
+        info,
+        fundamentals,
+        DcfAssumptions(0.10, 0.03, 0.02, 5),
+        fcf,
+    )
+    messages = " ".join(warning.message for warning in warnings)
+
+    assert "ordinary corporate net debt" in messages
+    assert "financing operations" in messages

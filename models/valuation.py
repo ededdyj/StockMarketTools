@@ -56,6 +56,7 @@ class ScenarioValuation:
     assumptions: DcfAssumptions
     valuation: Optional[ValuationResult]
     upside_downside: Optional[float]
+    thesis: str = ""
     warnings: list[str] = field(default_factory=list)
 
 
@@ -261,7 +262,12 @@ def calculate_scenario_valuations(
         upside = None
         if valuation and valuation.fair_value_per_share is not None and current_price:
             upside = (valuation.fair_value_per_share - current_price) / current_price
-        results.append(ScenarioValuation(name, assumptions, valuation, upside, warnings))
+        thesis_map = {
+            "Bear": "FCF normalization/downcycle, lower margins, slower growth, higher discount rate.",
+            "Base": "Management guidance partially achieved, moderate FCF conversion, stable terminal growth.",
+            "Bull": "Sustained growth, strong FCF conversion, buybacks, durable margin structure.",
+        }
+        results.append(ScenarioValuation(name, assumptions, valuation, upside, thesis_map.get(name, ""), warnings))
     return results
 
 

@@ -545,6 +545,76 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
     ),
     KnowledgeNode(
+        title="Valuation Input Provenance and Freshness",
+        category="Data Reliability",
+        summary="Normalizes major valuation inputs with source, formula, period/as-of date, retrieval timestamp, confidence, and freshness label.",
+        why_it_matters="A current share price can be mixed with older annual or quarterly financial statements; valuation users need to see that timing mismatch.",
+        inputs=[
+            "Market snapshot fields such as price, market cap, beta, and Yahoo profile metrics",
+            "Official or filing-derived statement periods for shares, cash, debt, revenue, net income, operating cash flow, capex, and FCF",
+            "FRED and Damodaran market input source strings for risk-free rate and equity risk premium",
+        ],
+        calculations=[
+            "Age in days = current app run date - parsed period/as-of date",
+            "Freshness labels: Fresh 0-45 days, Recent 46-120 days, Stale 121-365 days, Very stale over 365 days, Unknown when date is unavailable",
+            "Warnings when current market data is mixed with cash-flow data older than 120 days or statement dates cannot be parsed",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > Data Timing & Freshness",
+            "Assumptions & Data > Source Metadata and Freshness",
+            "ChatGPT Research Prompt Export > Data Timing & Freshness",
+        ],
+        limitations=[
+            "Yahoo profile fields may not expose precise timestamps for every metric.",
+            "A freshness label does not prove the data is correct; it only describes timing and source clarity.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "SEC guide to 10-K and 10-Q filings",
+                "https://www.investor.gov/introduction-investing/getting-started/researching-investments/how-read-10-k10-q",
+                "Explains why official filing dates and periods matter for company analysis.",
+            ),
+            KnowledgeSource(
+                "FRED DGS10",
+                "https://fred.stlouisfed.org/series/DGS10",
+                "Source page for the risk-free-rate proxy used in dynamic assumptions.",
+            ),
+        ],
+    ),
+    KnowledgeNode(
+        title="DCF Fit Label",
+        category="Valuation",
+        summary="Labels whether a standard free-cash-flow DCF is a High, Medium, or Low fit for the company and data quality.",
+        why_it_matters="Some companies need specialized models, and some datasets are too noisy for a clean point estimate.",
+        inputs=[
+            "Sector, industry, and quote type",
+            "Starting FCF availability and sign",
+            "Share-count data-quality risk",
+            "High/medium DCF warning counts",
+            "Cash and debt fallback usage",
+        ],
+        calculations=[
+            "Start from a 100-point suitability score",
+            "Subtract for non-standard sectors, cyclical industries, missing/negative FCF, share-count risk, major warnings, and cash/debt fallbacks",
+            "High is 75+, Medium is 45-74, Low is below 45",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > DCF Fit",
+            "ChatGPT Research Prompt Export > DCF fit / confidence label",
+        ],
+        limitations=[
+            "The label is an interpretation aid, not an investment rating.",
+            "Sector keyword rules are intentionally conservative and may need future refinement.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "Damodaran valuation material",
+                "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html",
+                "Reference for matching valuation methods and assumptions to business type and data quality.",
+            )
+        ],
+    ),
+    KnowledgeNode(
         title="Data Sources and Fallbacks",
         category="Data Reliability",
         summary=(

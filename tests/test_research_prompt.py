@@ -1,7 +1,9 @@
 from content.research_prompt import StockResearchPromptInputs, build_stock_research_prompt
 from models.dcf_assumptions import AssumptionLine, DynamicDcfEstimate
+from models.dcf_fit import DcfFitResult
 from models.free_cash_flow import FreeCashFlowSnapshot
 from models.financial_health import FinancialHealthResult, HealthSignal
+from models.provenance import DataFreshnessReport, ValuationInputProvenance
 from models.valuation import DcfAssumptions, ValuationResult
 from utils.fundamentals import FundamentalsSnapshot
 
@@ -99,6 +101,25 @@ def test_build_stock_research_prompt_includes_app_context_and_instructions():
                 operating_cash_flow=12_000_000,
                 capital_expenditures=-2_000_000,
             ),
+            dcf_fit=DcfFitResult("Medium", 62, ["Cyclical hardware exposure."]),
+            provenance_report=DataFreshnessReport(
+                run_timestamp="2026-05-31 10:00:00 UTC",
+                rows=[
+                    ValuationInputProvenance(
+                        name="Free Cash Flow",
+                        value=10_000_000,
+                        source="Yahoo Finance operating cash flow and capital expenditures",
+                        formula="Free cash flow = operating cash flow - abs(capital expenditures)",
+                        period_or_as_of="2025-12-31",
+                        retrieval_timestamp="2026-05-31 10:00:00 UTC",
+                        confidence="High",
+                        category="Derived estimate",
+                        age_days=151,
+                        freshness_label="Stale",
+                    )
+                ],
+                warnings=["Current market data is being mixed with cash-flow data from 2025-12-31."],
+            ),
         )
     )
 
@@ -112,6 +133,12 @@ def test_build_stock_research_prompt_includes_app_context_and_instructions():
     assert "Free-cash-flow source selection" in prompt
     assert "Share-count diagnostics" in prompt
     assert "DCF data-quality warnings" in prompt
+    assert "DCF fit / confidence label" in prompt
+    assert "DCF suitability: Medium" in prompt
+    assert "Data Timing & Freshness" in prompt
+    assert "Research Checklist for External Verification" in prompt
+    assert "Latest SEC 10-K/10-Q" in prompt
+    assert "verify whether newer filings" in prompt
     assert "Build your own fair value estimate and price target range" in prompt
     assert "Please cite the sources you use" in prompt
 

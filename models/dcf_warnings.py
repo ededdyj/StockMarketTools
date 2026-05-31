@@ -82,6 +82,26 @@ def generate_dcf_warnings(
     if (price_to_book is not None and price_to_book < 0) or (book_value is not None and book_value < 0):
         _add(warnings, "Medium", "Balance Sheet", "Book value or price/book is negative; book-based valuation ratios may be distorted.")
 
+    market_cap = info.get("marketCap")
+    if market_cap and fundamentals.total_debt:
+        debt_to_market_cap = fundamentals.total_debt / market_cap
+        if debt_to_market_cap > 0.75:
+            _add(
+                warnings,
+                "Medium",
+                "Debt",
+                f"Total debt is {debt_to_market_cap:.1%} of market cap; inspect whether all debt should be treated as ordinary corporate net debt.",
+            )
+
+    business_summary = str(info.get("longBusinessSummary", "")).lower()
+    if "financing" in business_summary and any(term in business_summary for term in ["receivable", "receivables", "finance receivable", "financial services"]):
+        _add(
+            warnings,
+            "Medium",
+            "Debt",
+            "Company appears to have financing operations or financing receivables; net debt may overstate the economic debt deduction.",
+        )
+
     share_resolution = fundamentals.share_resolution
     if share_resolution:
         for message in share_resolution.warnings:

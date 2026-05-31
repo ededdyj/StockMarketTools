@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from models.dcf_assumptions import DynamicDcfEstimate
+from models.dcf_fit import DcfFitResult
 from models.dcf_warnings import DcfWarning
 from models.free_cash_flow import FreeCashFlowSnapshot
+from models.provenance import DataFreshnessReport
 from models.financial_health import FinancialHealthResult
 from models.valuation import DcfAssumptions, ReverseDcfResult, ScenarioValuation, ValuationResult
 from utils.fundamentals import FundamentalsSnapshot
@@ -39,6 +41,8 @@ class StockResearchPromptInputs:
     fair_value_range: Optional[tuple[float, float]] = None
     fcf_snapshot: Optional[FreeCashFlowSnapshot] = None
     dcf_warnings: list[DcfWarning] = None
+    dcf_fit: Optional[DcfFitResult] = None
+    provenance_report: Optional[DataFreshnessReport] = None
     scenarios: list[ScenarioValuation] = None
     sensitivity_table: object = None
     reverse_dcf: Optional[ReverseDcfResult] = None
@@ -218,6 +222,13 @@ def _format_sensitivity(table) -> list[str]:
 
 
 def _format_source_metadata(inputs: StockResearchPromptInputs) -> list[str]:
+    if inputs.provenance_report:
+        return [
+            f"- {row.name}: {_number(row.value, 2) if isinstance(row.value, (int, float)) and abs(row.value) <= 10 else _money(row.value, 0) if isinstance(row.value, (int, float)) else row.value or 'N/A'} | "
+            f"Category: {row.category} | Source: {row.source} | Period: {row.period_or_as_of or 'N/A'} | "
+            f"Freshness: {row.freshness_label} | Confidence: {row.confidence} | Formula: {row.formula}"
+            for row in inputs.provenance_report.rows
+        ]
     fundamentals = inputs.fundamentals
     fcf = inputs.fcf_snapshot
     rows = [
@@ -244,6 +255,50 @@ def _format_source_metadata(inputs: StockResearchPromptInputs) -> list[str]:
     return rows
 
 
+def _format_data_freshness(report: Optional[DataFreshnessReport]) -> list[str]:
+    if report is None:
+        return ["- Data freshness report unavailable."]
+    rows = [f"- Current app run timestamp: {report.run_timestamp}"]
+    for row in report.rows:
+        if row.name in {"Current Price", "Market Cap", "Shares Used", "Cash", "Total Debt", "Free Cash Flow", "Revenue", "Net Income", "Risk-free Rate", "Equity Risk Premium"}:
+            rows.append(
+                f"- {row.name}: period/as-of {row.period_or_as_of or 'N/A'}, age "
+                f"{row.age_days if row.age_days is not None else 'Unknown'} days, freshness {row.freshness_label}, source {row.source}"
+            )
+    if report.warnings:
+        rows.append("- Stale-data warnings:")
+        rows.extend(f"  - {warning}" for warning in report.warnings)
+    return rows
+
+
+def _format_dcf_fit(fit: Optional[DcfFitResult]) -> list[str]:
+    if fit is None:
+        return ["- DCF fit unavailable."]
+    return [
+        f"- DCF suitability: {fit.label} ({fit.score}/100)",
+        *[f"- Reason: {reason}" for reason in fit.reasons],
+    ]
+
+
+def _research_checklist() -> list[str]:
+    return [
+        "- Latest SEC 10-K/10-Q and any filings after the app's statement dates",
+        "- Latest earnings release and call transcript",
+        "- Latest investor presentation",
+        "- Management guidance and whether guidance changed after the app's financial-statement periods",
+        "- Segment revenue, segment margins, backlog/order trends, and mix shifts",
+        "- Gross/operating margin drivers and durability",
+        "- Working capital requirements, capex needs, and FCF conversion",
+        "- Debt maturities, financing debt, receivables-backed debt, and refinancing risk",
+        "- Buybacks, dilution, share count class changes, and capital returns",
+        "- Dividends, payout ratio, special distributions, and sustainability",
+        "- Legal, regulatory, accounting, customer concentration, and geopolitical risks",
+        "- Macro sensitivity, industry cycle, and competitive threats",
+        "- Analyst expectations and the assumptions embedded in consensus estimates",
+        "- Evidence that would change the valuation or invalidate the bull/base/bear cases",
+    ]
+
+
 def build_stock_research_prompt(inputs: StockResearchPromptInputs) -> str:
     """Build a copyable prompt containing app context plus research instructions."""
 
@@ -264,6 +319,7 @@ def build_stock_research_prompt(inputs: StockResearchPromptInputs) -> str:
         f"Research {inputs.ticker} ({inputs.company_name}) as an equity investment.",
         "",
         "Use the app-provided context below as the starting point, then research current external information from primary or high-quality sources. Do not treat the app output as final. Check the latest filings, earnings release, management guidance, investor presentation, recent news, analyst expectations, competitive position, and industry conditions.",
+        "Explicitly verify whether newer filings, earnings releases, investor presentations, or management guidance exist after the app's financial-statement dates.",
         "",
         "Your task:",
         "1. Verify whether the app's fair value estimate is reasonable.",
@@ -305,6 +361,12 @@ def build_stock_research_prompt(inputs: StockResearchPromptInputs) -> str:
         f"- Data pulled at: {fundamentals.pulled_at}",
         f"- Assumption status: {default_label}",
         "",
+        "DCF fit / confidence label:",
+        *_format_dcf_fit(inputs.dcf_fit),
+        "",
+        "Data Timing & Freshness:",
+        *_format_data_freshness(inputs.provenance_report),
+        "",
         "Full app DCF equity bridge:",
         *_format_equity_bridge(valuation, fundamentals),
         "",
@@ -319,6 +381,9 @@ def build_stock_research_prompt(inputs: StockResearchPromptInputs) -> str:
         "",
         "Major valuation input source metadata:",
         *_format_source_metadata(inputs),
+        "",
+        "Research Checklist for External Verification:",
+        *_research_checklist(),
         "",
         "Active DCF assumptions:",
         *_format_assumptions(inputs.assumptions),
