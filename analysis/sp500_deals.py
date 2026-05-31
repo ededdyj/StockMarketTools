@@ -69,7 +69,7 @@ def analyze_sp500_deals(assumptions: DcfAssumptions = VALUE_DCF_ASSUMPTIONS) -> 
                 skipped.append(SkippedTicker(ticker, "missing_cashflow"))
                 continue
 
-            fundamentals = extract_fundamentals(info, stock.balance_sheet)
+            fundamentals = extract_fundamentals(info, stock.balance_sheet, financials=stock.financials)
 
             # Calculate fair value using our DCF model
             valuation = calculate_fair_value(

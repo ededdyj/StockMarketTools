@@ -163,7 +163,7 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
                 financial_health_source,
                 sec_warnings,
             ) = add_sec_fallback_to_statements(ticker, financials, balance_sheet, cashflow)
-            fundamentals = extract_fundamentals(info, balance_sheet)
+            fundamentals = extract_fundamentals(info, balance_sheet, financials=financials)
             financial_health = calculate_financial_health(health_financials, health_balance_sheet, health_cashflow)
             valuation = calculate_fair_value(
                 cashflow,

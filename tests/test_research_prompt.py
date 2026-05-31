@@ -1,5 +1,6 @@
 from content.research_prompt import StockResearchPromptInputs, build_stock_research_prompt
 from models.dcf_assumptions import AssumptionLine, DynamicDcfEstimate
+from models.free_cash_flow import FreeCashFlowSnapshot
 from models.financial_health import FinancialHealthResult, HealthSignal
 from models.valuation import DcfAssumptions, ValuationResult
 from utils.fundamentals import FundamentalsSnapshot
@@ -90,6 +91,14 @@ def test_build_stock_research_prompt_includes_app_context_and_instructions():
                 fair_value_per_share=130,
             ),
             fair_value_range=(110, 150),
+            fcf_snapshot=FreeCashFlowSnapshot(
+                value=10_000_000,
+                source="Yahoo Finance operating cash flow and capital expenditures",
+                period="2025-12-31",
+                formula="Free cash flow = operating cash flow - abs(capital expenditures)",
+                operating_cash_flow=12_000_000,
+                capital_expenditures=-2_000_000,
+            ),
         )
     )
 
@@ -99,6 +108,10 @@ def test_build_stock_research_prompt_includes_app_context_and_instructions():
     assert "Implied upside/downside to app fair value: 62.5%" in prompt
     assert "Score: 1/9" in prompt
     assert "Profitability: Positive ROA = Pass" in prompt
+    assert "Full app DCF equity bridge" in prompt
+    assert "Free-cash-flow source selection" in prompt
+    assert "Share-count diagnostics" in prompt
+    assert "DCF data-quality warnings" in prompt
     assert "Build your own fair value estimate and price target range" in prompt
     assert "Please cite the sources you use" in prompt
 

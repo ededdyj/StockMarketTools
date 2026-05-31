@@ -46,17 +46,28 @@ not optimized to do.
     has at least one source link.
 
 - **Discounted Cash Flow (used in Single Stock and SP500 Deals)**
-  - Uses the most recent Free Cash Flow from `yfinance.cashflow`.
+  - Uses a normalized starting Free Cash Flow resolver. By default it calculates
+    `FreeCashFlow = OperatingCashFlow - abs(CapitalExpenditures)` from
+    `yfinance.cashflow`, falling back to the Yahoo `Free Cash Flow` line item
+    when operating cash flow/capex are unavailable.
+  - Single-stock mode also supports latest fiscal-year FCF, 3-year average FCF,
+    a TTM fallback mode, and user-entered normalized FCF.
   - Projects cash flow for *n* years (default `n = 5`) with growth rate `g`.
   - Present value `EV = Σ (FCF_t / (1 + r)^t) + TerminalValue`, where
     `TerminalValue = FCF_n * (1 + g_terminal) / (r - g_terminal)`.
   - Equity value = `EV - NetDebt`, where `NetDebt = TotalDebt - Cash & Equivalents`
     sourced from the latest Yahoo Finance balance sheet (Long Term + Short Term
     debt is used when `Total Debt` is missing).
-  - Fair value per share = `Equity Value / Shares Outstanding`; the UI disables
-    per-share output if Yahoo Finance does not supply a reliable share count.
+  - Fair value per share = `Equity Value / Shares Used`; the UI disables
+    per-share output if no reliable share count is available.
+  - Single-stock mode now shows the full DCF equity bridge: starting FCF,
+    projected FCF by year, PV of explicit FCF, terminal value, PV of terminal
+    value, enterprise value, cash, debt, net debt, equity value, shares used, and
+    fair value per share.
   - Confidence intervals vary discount/growth ± small bands to illustrate
     sensitivity.
+  - Single-stock mode adds bull/base/bear scenarios, discount-rate vs terminal
+    growth sensitivity, and reverse DCF implied-growth output.
   - In single-stock mode, the sidebar starts from dynamic ticker-specific
     assumptions and still lets the user edit every input. A reset button restores
     the generated defaults for the selected ticker. Inputs are validated so
@@ -81,9 +92,25 @@ not optimized to do.
   - Cash and debt line items fall back to zero with a warning if Yahoo Finance
     omits them. The “Assumptions & Data” expander shows which fields were used
     and the balance-sheet “as-of” date.
-  - Shares default to `sharesOutstanding`, then to `impliedSharesOutstanding`.
-    Missing/zero values disable per-share DCF output and surface a warning in the
-    UI as well as the log panel.
+  - Shares are resolved from filing-derived diluted/common share counts,
+    `sharesOutstanding`, `impliedSharesOutstanding`, and
+    `marketCap / currentPrice`. The app compares all candidates and warns when
+    they materially disagree.
+  - Share-count differences above 10% show a warning; differences above 25% or
+    candidates that differ by about 2x are marked as valuation data-quality risk.
+    Missing/zero values disable per-share DCF output.
+
+- **DCF Data Quality**
+  - Single-stock mode centralizes valuation warnings near the DCF output:
+    suspicious dividend yield/payout ratio, negative book value, share-count
+    mismatches, clamped growth assumptions, terminal-growth/discount-rate risk,
+    stale balance sheets, missing cash/debt fallbacks, negative/missing FCF,
+    cash-flow/net-income gaps, major share-count changes, and SEC fallback
+    issues.
+  - “Assumptions & Data” includes source metadata for major valuation inputs:
+    price, market cap, shares used, implied shares, cash, debt, net debt,
+    operating cash flow, capex, FCF, revenue, beta, risk-free rate, equity risk
+    premium, WACC/discount rate, explicit growth, and terminal growth.
 
 - **Value Score (Quality vs Value Screener)**
   - `ValueScore = max((FairValue - Price) / FairValue, 0)`.
@@ -132,7 +159,9 @@ not optimized to do.
     output.
   - The prompt includes company context, current market metrics, the app's DCF
     fair value estimate, sensitivity range, active assumptions, dynamic default
-    derivation, financial health score, and known app limitations.
+    derivation, financial health score, share-count diagnostics, full equity
+    bridge, source metadata, data-quality warnings, FCF source selection,
+    scenarios, sensitivity table, reverse DCF output, and known app limitations.
   - The prompt instructs ChatGPT to research current filings, earnings releases,
     guidance, news, competitive position, industry conditions, capital returns,
     debt maturities, dilution, and other factors that could change valuation.

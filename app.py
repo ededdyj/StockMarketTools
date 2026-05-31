@@ -11,7 +11,19 @@ from typing import Dict, List, Tuple, Optional
 from data.fetcher import get_stock_data
 from data.market_inputs import get_market_inputs
 from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assumptions
-from models.valuation import calculate_fair_value, calculate_fair_value_range, DcfAssumptions
+from models.dcf_warnings import DcfWarning, generate_dcf_warnings
+from models.free_cash_flow import FreeCashFlowSnapshot, resolve_free_cash_flow
+from models.valuation import (
+    DcfAssumptions,
+    ScenarioValuation,
+    ValuationResult,
+    calculate_fair_value,
+    calculate_fair_value_range,
+    calculate_scenario_valuations,
+    calculate_sensitivity_table,
+    default_scenarios,
+    reverse_dcf_implied_growth,
+)
 from models.financial_health import calculate_financial_health, FinancialHealthResult
 from utils.charts import plot_price_history, plot_cashflow
 from analysis.sp500_deals import analyze_sp500_deals
@@ -156,6 +168,78 @@ def get_user_dcf_assumptions(
     )
     is_valid, message = assumptions.validate()
     return assumptions, is_valid, message
+
+
+def get_user_fcf_selection(cashflow: pd.DataFrame) -> FreeCashFlowSnapshot:
+    with st.sidebar.expander("DCF Starting FCF", expanded=False):
+        method_label = st.selectbox(
+            "Starting FCF Source",
+            ["Latest fiscal year", "3-year average", "TTM fallback", "User-entered normalized FCF"],
+            help="The DCF starts from this free-cash-flow value before applying growth assumptions.",
+        )
+        user_fcf = None
+        if method_label == "User-entered normalized FCF":
+            user_fcf = st.number_input(
+                "Normalized FCF (USD)",
+                min_value=-1_000_000_000_000.0,
+                max_value=1_000_000_000_000.0,
+                value=0.0,
+                step=100_000_000.0,
+                format="%.0f",
+            )
+        method_map = {
+            "Latest fiscal year": "latest_fiscal_year",
+            "3-year average": "three_year_average",
+            "TTM fallback": "ttm",
+            "User-entered normalized FCF": "user_override",
+        }
+    return resolve_free_cash_flow(
+        cashflow,
+        method=method_map[method_label],
+        user_normalized_fcf=user_fcf if method_label == "User-entered normalized FCF" else None,
+    )
+
+
+def get_user_scenario_assumptions(base: DcfAssumptions) -> dict[str, DcfAssumptions]:
+    scenarios = default_scenarios(base)
+    with st.expander("Bull / Base / Bear Scenario Assumptions", expanded=False):
+        st.caption("Each scenario reuses the same starting FCF, net debt, and share count; edit rates to stress-test valuation.")
+        for name, defaults in list(scenarios.items()):
+            cols = st.columns(3)
+            with cols[0]:
+                growth = st.number_input(
+                    f"{name} Growth (%)",
+                    value=defaults.growth_rate * 100,
+                    min_value=-50.0,
+                    max_value=50.0,
+                    format="%.2f",
+                    key=f"scenario_{name.lower()}_growth",
+                ) / 100.0
+            with cols[1]:
+                discount = st.number_input(
+                    f"{name} Discount (%)",
+                    value=defaults.discount_rate * 100,
+                    min_value=-50.0,
+                    max_value=50.0,
+                    format="%.2f",
+                    key=f"scenario_{name.lower()}_discount",
+                ) / 100.0
+            with cols[2]:
+                terminal = st.number_input(
+                    f"{name} Terminal (%)",
+                    value=defaults.terminal_growth_rate * 100,
+                    min_value=-50.0,
+                    max_value=50.0,
+                    format="%.2f",
+                    key=f"scenario_{name.lower()}_terminal",
+                ) / 100.0
+            scenarios[name] = DcfAssumptions(
+                discount_rate=discount,
+                growth_rate=growth,
+                terminal_growth_rate=terminal,
+                projection_years=base.projection_years,
+            )
+    return scenarios
 
 
 def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
@@ -623,6 +707,207 @@ def render_cashflow_section(cashflow: pd.DataFrame):
         st.write("Free Cash Flow data not available.")
 
 
+def _warning_icon(severity: str) -> str:
+    if severity == "High":
+        return "High"
+    if severity == "Medium":
+        return "Medium"
+    if severity == "Low":
+        return "Low"
+    return "Info"
+
+
+def render_dcf_warnings(warnings: list[DcfWarning]):
+    if not warnings:
+        return
+    high = [warning for warning in warnings if warning.severity == "High"]
+    if high:
+        st.warning("\n".join(f"{warning.category}: {warning.message}" for warning in high))
+    with st.expander("DCF Data-Quality Warnings", expanded=bool(high)):
+        rows = [
+            {
+                "Severity": _warning_icon(warning.severity),
+                "Category": warning.category,
+                "Message": warning.message,
+            }
+            for warning in warnings
+        ]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def render_equity_bridge(valuation: ValuationResult, fundamentals: FundamentalsSnapshot):
+    projected_rows = [
+        {
+            "Year": index,
+            "Projected FCF": format_currency(value, 0),
+            "Formula": "Prior year FCF x (1 + explicit growth rate)",
+        }
+        for index, value in enumerate(valuation.projected_fcf, start=1)
+    ]
+    with st.expander("DCF Equity Bridge", expanded=True):
+        st.markdown(
+            """
+**Core formulas**
+
+- Free cash flow = Operating cash flow - capital expenditures
+- In yfinance, capital expenditures are often reported as a negative cash-flow line; the app treats capex as a cash outflow and subtracts `abs(capex)` to avoid adding it by mistake.
+- Net debt = total debt - cash and equivalents
+- Equity value = enterprise value - net debt
+- Fair value per share = equity value / shares used
+"""
+        )
+        bridge_rows = [
+            ("Starting FCF", valuation.starting_fcf, "Resolved normalized FCF", 0),
+            ("PV of Explicit FCF", valuation.pv_explicit_fcf, "Sum of discounted projected FCF years", 0),
+            ("Terminal Value", valuation.terminal_value, "FCF_n x (1 + terminal growth) / (discount - terminal growth)", 0),
+            ("PV of Terminal Value", valuation.pv_terminal_value, "Terminal value discounted to today", 0),
+            ("Enterprise Value", valuation.enterprise_value, "PV explicit FCF + PV terminal value", 0),
+            ("Cash and Equivalents", fundamentals.cash_and_equivalents, fundamentals.cash_source or "Missing, assumed 0", 0),
+            ("Short-Term Debt", fundamentals.short_term_debt, "Balance sheet short/current debt where available", 0),
+            ("Long-Term Debt", fundamentals.long_term_debt, "Balance sheet long-term debt where available", 0),
+            ("Total Debt", fundamentals.total_debt, fundamentals.debt_source or "Missing, assumed 0", 0),
+            ("Net Debt", fundamentals.net_debt, "Total debt - cash and equivalents", 0),
+            ("Equity Value", valuation.equity_value, "Enterprise value - net debt", 0),
+            ("Shares Used", valuation.shares_used, fundamentals.shares_source or "Unavailable", 0),
+            ("Fair Value per Share", valuation.fair_value_per_share, "Equity value / shares used", 2),
+        ]
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Bridge Item": label,
+                        "Value": format_currency(value, precision) if label != "Shares Used" else format_int(value),
+                        "Source / Formula": formula,
+                    }
+                    for label, value, formula, precision in bridge_rows
+                ]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        if projected_rows:
+            st.markdown("**Projected FCF by Year**")
+            st.dataframe(pd.DataFrame(projected_rows), use_container_width=True, hide_index=True)
+
+
+def render_share_diagnostics(fundamentals: FundamentalsSnapshot):
+    resolution = fundamentals.share_resolution
+    if not resolution:
+        return
+    with st.expander("Share Count Diagnostics", expanded=resolution.data_quality_risk):
+        col_selected, col_implied, col_diff = st.columns(3)
+        with col_selected:
+            st.metric("Shares Used", format_int(resolution.selected_shares))
+            st.caption(resolution.selected_shares_source or "Unavailable")
+        with col_implied:
+            st.metric("Implied Shares", format_int(resolution.implied_shares_from_market_cap))
+            st.caption("market cap / current price")
+        with col_diff:
+            st.metric("Selected vs Implied", format_percent(resolution.selected_vs_implied_pct_diff, 1))
+            st.caption("Absolute percent difference")
+        candidate_rows = [
+            {
+                "Candidate": candidate.source,
+                "Shares": format_int(candidate.value),
+                "Date / Period": candidate.date_or_period or "N/A",
+                "Formula": candidate.formula,
+            }
+            for candidate in resolution.candidates
+        ]
+        st.dataframe(pd.DataFrame(candidate_rows), use_container_width=True, hide_index=True)
+        if resolution.warnings:
+            st.warning("\n".join(resolution.warnings))
+
+
+def render_scenario_section(scenarios: list[ScenarioValuation]):
+    st.subheader("Bull / Base / Bear DCF Scenarios")
+    rows = []
+    for scenario in scenarios:
+        valuation = scenario.valuation
+        rows.append(
+            {
+                "Scenario": scenario.name,
+                "Starting FCF": format_currency(valuation.starting_fcf, 0) if valuation else "N/A",
+                "Growth": format_percent(scenario.assumptions.growth_rate, 1),
+                "Discount": format_percent(scenario.assumptions.discount_rate, 1),
+                "Terminal Growth": format_percent(scenario.assumptions.terminal_growth_rate, 1),
+                "Net Debt": format_currency(valuation.net_debt, 0) if valuation else "N/A",
+                "Shares Used": format_int(valuation.shares_used) if valuation else "N/A",
+                "Fair Value / Share": format_currency(valuation.fair_value_per_share) if valuation else "N/A",
+                "Upside / Downside": format_percent(scenario.upside_downside, 1),
+                "Warnings": " | ".join(scenario.warnings),
+            }
+        )
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def render_sensitivity_section(sensitivity: pd.DataFrame):
+    st.subheader("DCF Sensitivity")
+    st.caption("Rows vary terminal growth; columns vary discount rate. Invalid/too-close combinations are blank.")
+    if sensitivity.empty:
+        st.write("Sensitivity table unavailable.")
+        return
+    formatted = sensitivity.copy()
+    formatted["Terminal Growth"] = formatted["Terminal Growth"].apply(lambda value: format_percent(value, 1))
+    for column in formatted.columns:
+        if column == "Terminal Growth":
+            continue
+        formatted[column] = formatted[column].apply(lambda value: format_currency(value) if pd.notna(value) else "Invalid")
+    formatted.columns = [
+        column if column == "Terminal Growth" else f"Discount {format_percent(column, 1)}"
+        for column in formatted.columns
+    ]
+    st.dataframe(formatted, use_container_width=True, hide_index=True)
+
+
+def render_source_metadata(
+    info: Dict,
+    fundamentals: FundamentalsSnapshot,
+    fcf_snapshot: FreeCashFlowSnapshot,
+    dynamic_estimate: Optional[DynamicDcfEstimate],
+):
+    metadata_rows = [
+        ("Current Price", info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"), "Yahoo Finance profile/history", "Latest market snapshot", "currentPrice / regularMarketPrice / previousClose"),
+        ("Market Cap", info.get("marketCap"), "Yahoo Finance profile", "Latest market snapshot", "marketCap"),
+        ("Shares Used", fundamentals.shares_outstanding, fundamentals.shares_source or "Unavailable", fundamentals.shares_date_or_period or "N/A", "Share-count resolver"),
+        ("Implied Shares", fundamentals.implied_shares_from_market_cap, "Computed", "Latest market snapshot", "marketCap / currentPrice"),
+        ("Cash and Equivalents", fundamentals.cash_and_equivalents, fundamentals.cash_source or "Fallback", fundamentals.balance_sheet_as_of or "N/A", "Latest balance-sheet cash field"),
+        ("Short-Term Debt", fundamentals.short_term_debt, "Yahoo Finance balance sheet", fundamentals.balance_sheet_as_of or "N/A", "Short/current debt field"),
+        ("Long-Term Debt", fundamentals.long_term_debt, "Yahoo Finance balance sheet", fundamentals.balance_sheet_as_of or "N/A", "Long-term debt field"),
+        ("Total Debt", fundamentals.total_debt, fundamentals.debt_source or "Fallback", fundamentals.balance_sheet_as_of or "N/A", "Total Debt or Short + Long Debt"),
+        ("Net Debt", fundamentals.net_debt, "Computed", fundamentals.balance_sheet_as_of or "N/A", "Total debt - cash and equivalents"),
+        ("Operating Cash Flow", fcf_snapshot.operating_cash_flow, fcf_snapshot.source, fcf_snapshot.period or "N/A", "Cash flow statement operating cash flow"),
+        ("Capital Expenditures", fcf_snapshot.capital_expenditures, fcf_snapshot.source, fcf_snapshot.period or "N/A", "Capex treated as positive outflow"),
+        ("Free Cash Flow", fcf_snapshot.value, fcf_snapshot.source, fcf_snapshot.period or "N/A", fcf_snapshot.formula),
+        ("Revenue", info.get("totalRevenue"), "Yahoo Finance profile", "TTM/profile field", "totalRevenue"),
+        ("Beta", info.get("beta"), "Yahoo Finance profile", "Latest profile field", "beta"),
+    ]
+    if dynamic_estimate:
+        for line in dynamic_estimate.lines:
+            if line.assumption in {
+                "Risk-free rate",
+                "Equity risk premium",
+                "Pretax cost of debt",
+                "Tax rate",
+                "Discount rate",
+                "Growth rate",
+                "Terminal growth",
+            }:
+                metadata_rows.append((line.assumption, line.value, line.source, "Latest available", line.formula))
+
+    rows = [
+        {
+            "Input": name,
+            "Value": str(format_currency(value, 0) if isinstance(value, (int, float)) and abs(value) > 10 else format_ratio(value)),
+            "Source": source,
+            "Date / Period": period,
+            "Formula / Derivation": formula,
+        }
+        for name, value, source, period, formula in metadata_rows
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
 def render_dcf_section(
     info: Dict,
     cashflow: pd.DataFrame,
@@ -630,22 +915,22 @@ def render_dcf_section(
     philosophy,
     assumptions: DcfAssumptions,
     default_assumptions: DcfAssumptions,
+    valuation: Optional[ValuationResult],
+    fair_value_range,
+    fcf_snapshot: FreeCashFlowSnapshot,
+    dcf_warnings: list[DcfWarning],
+    scenarios: list[ScenarioValuation],
+    sensitivity: pd.DataFrame,
+    reverse_dcf,
     dynamic_estimate: Optional[DynamicDcfEstimate] = None,
 ):
     st.subheader("Intrinsic Value (DCF Model)")
-    if cashflow is None or cashflow.empty:
-        st.write("Insufficient data to calculate fair value.")
+    if valuation is None:
+        st.write("Fair Value calculation could not be completed due to missing or invalid DCF inputs.")
+        render_dcf_warnings(dcf_warnings)
         return
 
-    valuation = calculate_fair_value(
-        cashflow,
-        net_debt=fundamentals.net_debt,
-        shares_outstanding=fundamentals.shares_outstanding,
-        assumptions=assumptions,
-    )
-    if valuation is None:
-        st.write("Fair Value calculation could not be completed due to missing data.")
-        return
+    render_dcf_warnings(dcf_warnings)
 
     cards = [
         ("Enterprise Value (EV)", valuation.enterprise_value, 0),
@@ -658,19 +943,19 @@ def render_dcf_section(
         with col:
             st.metric(label, format_currency(value, precision))
 
-    fair_value_range = calculate_fair_value_range(
-        cashflow,
-        net_debt=fundamentals.net_debt,
-        shares_outstanding=fundamentals.shares_outstanding,
-        assumptions=assumptions,
-    )
-
     if fair_value_range:
         st.caption(
             f"Fair Value Confidence Interval: {format_currency(fair_value_range[0])} - {format_currency(fair_value_range[1])}"
         )
     elif valuation.fair_value_per_share is None:
         st.info("Per-share valuation requires a reliable share count; Yahoo Finance did not supply one.")
+
+    render_equity_bridge(valuation, fundamentals)
+    render_share_diagnostics(fundamentals)
+    render_scenario_section(scenarios)
+    render_sensitivity_section(sensitivity)
+    st.subheader("Reverse DCF")
+    st.write(reverse_dcf.message)
 
     assumption_rows = [
         (
@@ -696,8 +981,8 @@ def render_dcf_section(
         ),
         (
             "Projection Years",
-            assumptions.projection_years,
-            default_assumptions.projection_years,
+            str(assumptions.projection_years),
+            str(default_assumptions.projection_years),
             "Yes" if assumptions.projection_years != default_assumptions.projection_years else "No",
             "Explicit forecast horizon",
         ),
@@ -709,6 +994,8 @@ def render_dcf_section(
 
     with st.expander("Assumptions & Data"):
         st.table(assumption_df)
+        st.markdown("**Source Metadata for Major Valuation Inputs**")
+        render_source_metadata(info, fundamentals, fcf_snapshot, dynamic_estimate)
         if dynamic_estimate:
             dynamic_rows = [
                 {
@@ -754,6 +1041,11 @@ def render_chatgpt_prompt_export(
     dynamic_estimate: Optional[DynamicDcfEstimate],
     valuation,
     fair_value_range,
+    fcf_snapshot: Optional[FreeCashFlowSnapshot],
+    dcf_warnings: list[DcfWarning],
+    scenarios: list[ScenarioValuation],
+    sensitivity: pd.DataFrame,
+    reverse_dcf,
     timeframe_option: str,
     timeframe_note: str,
 ):
@@ -791,6 +1083,11 @@ def render_chatgpt_prompt_export(
                 dynamic_estimate=dynamic_estimate,
                 valuation=valuation,
                 fair_value_range=fair_value_range,
+                fcf_snapshot=fcf_snapshot,
+                dcf_warnings=dcf_warnings,
+                scenarios=scenarios,
+                sensitivity_table=sensitivity,
+                reverse_dcf=reverse_dcf,
                 timeframe_label=timeframe_option,
                 timeframe_note=timeframe_note,
             )
@@ -916,7 +1213,7 @@ def single_stock_analysis(philosophy, mode_description: str):
     financial_health_source = data.get("financial_health_source", "Yahoo Finance")
     sec_warnings = data.get("sec_warnings", [])
 
-    fundamentals = extract_fundamentals(info, balance_sheet)
+    fundamentals = extract_fundamentals(info, balance_sheet, financials=financials)
     financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
     dynamic_dcf = estimate_dynamic_dcf_assumptions(
         info,
@@ -930,6 +1227,7 @@ def single_stock_analysis(philosophy, mode_description: str):
         state_key=f"single-stock:{ticker}",
         reset_label="Reset to dynamic defaults",
     )
+    fcf_snapshot = get_user_fcf_selection(cashflow)
 
     warn_if_data_missing(info, history, cashflow, ticker)
 
@@ -947,19 +1245,67 @@ def single_stock_analysis(philosophy, mode_description: str):
     if assumptions_valid:
         prompt_valuation = None
         prompt_fair_value_range = None
-        if cashflow is not None and not cashflow.empty:
+        scenarios = []
+        sensitivity = pd.DataFrame()
+        reverse_dcf = reverse_dcf_implied_growth(
+            None,
+            None,
+            None,
+            None,
+            user_assumptions.discount_rate,
+            user_assumptions.terminal_growth_rate,
+            user_assumptions.projection_years,
+        )
+        if fcf_snapshot.value is not None:
             prompt_valuation = calculate_fair_value(
                 cashflow,
                 net_debt=fundamentals.net_debt,
                 shares_outstanding=fundamentals.shares_outstanding,
                 assumptions=user_assumptions,
+                starting_fcf=fcf_snapshot.value,
             )
             prompt_fair_value_range = calculate_fair_value_range(
                 cashflow,
                 net_debt=fundamentals.net_debt,
                 shares_outstanding=fundamentals.shares_outstanding,
                 assumptions=user_assumptions,
+                starting_fcf=fcf_snapshot.value,
             )
+            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
+            scenario_assumptions = get_user_scenario_assumptions(user_assumptions)
+            scenarios = calculate_scenario_valuations(
+                fcf_snapshot.value,
+                fundamentals.net_debt,
+                fundamentals.shares_outstanding,
+                current_price,
+                scenario_assumptions,
+            )
+            sensitivity = calculate_sensitivity_table(
+                fcf_snapshot.value,
+                fundamentals.net_debt,
+                fundamentals.shares_outstanding,
+                user_assumptions,
+            )
+            reverse_dcf = reverse_dcf_implied_growth(
+                current_price,
+                fundamentals.shares_outstanding,
+                fundamentals.net_debt,
+                fcf_snapshot.value,
+                user_assumptions.discount_rate,
+                user_assumptions.terminal_growth_rate,
+                user_assumptions.projection_years,
+            )
+        dcf_warnings = generate_dcf_warnings(
+            info,
+            fundamentals,
+            user_assumptions,
+            fcf_snapshot,
+            dynamic_estimate=dynamic_dcf,
+            financials=financials,
+            cashflow=cashflow,
+            sec_warnings=sec_warnings,
+            philosophy_name=philosophy.name,
+        )
         render_dcf_section(
             info,
             cashflow,
@@ -967,6 +1313,13 @@ def single_stock_analysis(philosophy, mode_description: str):
             philosophy,
             user_assumptions,
             dynamic_dcf.assumptions,
+            prompt_valuation,
+            prompt_fair_value_range,
+            fcf_snapshot,
+            dcf_warnings,
+            scenarios,
+            sensitivity,
+            reverse_dcf,
             dynamic_estimate=dynamic_dcf,
         )
         render_chatgpt_prompt_export(
@@ -979,6 +1332,11 @@ def single_stock_analysis(philosophy, mode_description: str):
             dynamic_dcf,
             prompt_valuation,
             prompt_fair_value_range,
+            fcf_snapshot,
+            dcf_warnings,
+            scenarios,
+            sensitivity,
+            reverse_dcf,
             timeframe_option,
             timeframe_note,
         )
@@ -1003,10 +1361,12 @@ Fair value is estimated using a simplified DCF model that:
 - Projects cash flow using the DCF assumptions in the sidebar.
 - Applies the sidebar terminal growth and discount rates.
 - Subtracts net debt (Total Debt − Cash) to convert Enterprise Value to Equity Value.
-- Divides Equity Value by shares outstanding to arrive at a fair value per share.
+- Divides Equity Value by the share-count resolver's selected shares to arrive
+  at a fair value per share.
 
 Companies missing any of those inputs are skipped, so treat this as a
-high-level triage for traditional value ideas.
+high-level triage for traditional value ideas. The Notes column flags share,
+cash, debt, and other valuation-input risks surfaced during batch processing.
 """)
     with st.spinner("Analyzing S&P 500 companies..."):
         sp500_result = analyze_sp500_deals(assumptions=user_assumptions)
@@ -1040,6 +1400,8 @@ Upload your own ticker list or pick one of the pre-loaded universes.
 Percentile ranks are calculated across the active universe only.
 The financial health details column shows which accounting signals passed,
 failed, or were unavailable from Yahoo Finance.
+Fundamental notes flag share-count, cash, debt, and SEC fallback issues that can
+affect valuation quality.
 """)
     with st.spinner("Analyzing selected/uploaded stocks for quality and value..."):
         qv_result = analyze_quality_value_screener(assumptions=user_assumptions)

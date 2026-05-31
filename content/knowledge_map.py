@@ -321,6 +321,230 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
     ),
     KnowledgeNode(
+        title="Share-Count Resolver",
+        category="Valuation Inputs",
+        summary="Selects the share count used in per-share valuation after comparing filing-derived, Yahoo, and market-cap-implied candidates.",
+        why_it_matters="A stale or inconsistent share count can double or halve fair value per share even when enterprise value is reasonable.",
+        inputs=[
+            "Yahoo Finance sharesOutstanding and impliedSharesOutstanding",
+            "Diluted average shares and common/ordinary shares from statements where available",
+            "Market cap and current price to compute implied shares",
+        ],
+        calculations=[
+            "Implied shares = market cap / current price",
+            "Selected-vs-implied difference = abs(selected - implied) / implied",
+            "Warn above 10%, mark risk above 25%, and strongly warn when plausible candidates differ by 2x",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > Share Count Diagnostics",
+            "DCF Data-Quality Warnings",
+            "ChatGPT Research Prompt Export",
+        ],
+        limitations=[
+            "Market-cap-implied shares depend on Yahoo market cap and price quality.",
+            "Filing share counts can lag buybacks, issuance, and class conversions.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "SEC guide to 10-K and 10-Q filings",
+                "https://www.investor.gov/introduction-investing/getting-started/researching-investments/how-read-10-k10-q",
+                "Primary filings are the best source for share-count changes and dilution context.",
+            )
+        ],
+    ),
+    KnowledgeNode(
+        title="DCF Equity Bridge",
+        category="Valuation",
+        summary="Shows the path from starting FCF to enterprise value, equity value, shares used, and fair value per share.",
+        why_it_matters="The bridge makes it clear whether valuation changes come from operations, debt/cash, or share count.",
+        inputs=[
+            "Starting free cash flow",
+            "DCF assumptions",
+            "Cash, debt, net debt, and shares used",
+        ],
+        calculations=[
+            "Enterprise Value = PV explicit FCF + PV terminal value",
+            "Net Debt = total debt - cash and equivalents",
+            "Equity Value = Enterprise Value - Net Debt",
+            "Fair Value per Share = Equity Value / Shares Used",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > DCF Equity Bridge",
+            "Assumptions & Data source metadata table",
+            "ChatGPT Research Prompt Export",
+        ],
+        limitations=[
+            "The bridge is only as good as the cash flow, debt, cash, and share data feeding it.",
+            "It does not replace a full operating forecast model.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "Damodaran DCF stable growth notes",
+                "https://pages.stern.nyu.edu/~adamodar/pdfiles/eqnotes/dcfstabl.pdf",
+                "Reference for DCF structure and terminal value mechanics.",
+            )
+        ],
+    ),
+    KnowledgeNode(
+        title="Free Cash Flow Normalization",
+        category="Valuation Inputs",
+        summary="Calculates starting FCF consistently from operating cash flow and capital expenditures, while supporting average and user-normalized inputs.",
+        why_it_matters="Capex sign conventions differ across data providers; inconsistent treatment can overstate or understate FCF.",
+        inputs=[
+            "Operating cash flow",
+            "Capital expenditures",
+            "Yahoo Free Cash Flow line item fallback",
+            "Optional user-entered normalized FCF",
+        ],
+        calculations=[
+            "Free cash flow = operating cash flow - abs(capital expenditures)",
+            "3-year average FCF = average of latest three resolved annual FCF values",
+            "TTM mode falls back to latest fiscal year when reliable quarterly data is unavailable",
+        ],
+        transparency_surfaces=[
+            "Sidebar DCF Starting FCF controls",
+            "DCF Equity Bridge",
+            "Assumptions & Data source metadata",
+        ],
+        limitations=[
+            "TTM FCF needs reliable quarterly data, which yfinance may not provide consistently.",
+            "Normalized FCF overrides depend on user judgment.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "SEC guide to financial statements",
+                "https://www.investor.gov/introduction-investing/getting-started/researching-investments/how-read-10-k10-q",
+                "Explains the role of financial statements and filings in company analysis.",
+            )
+        ],
+    ),
+    KnowledgeNode(
+        title="DCF Data-Quality Warnings",
+        category="Data Reliability",
+        summary="Centralizes valuation warnings for suspicious market data, stale statements, risky assumptions, and missing inputs.",
+        why_it_matters="The app should not silently treat incomplete or inconsistent free data as clean valuation evidence.",
+        inputs=[
+            "Market metrics, dividends, payout ratio, price/book, and share diagnostics",
+            "Balance-sheet date, cash/debt fallbacks, FCF snapshot, and SEC fallback warnings",
+            "DCF assumptions and dynamic default warnings",
+        ],
+        calculations=[
+            "Flag dividend yield above 15% and payout ratio above 100%",
+            "Flag selected share count vs implied shares above 10% and 25%",
+            "Flag discount-rate/terminal-growth spreads below 2%",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > DCF Data-Quality Warnings",
+            "Assumptions & Data expander",
+            "ChatGPT Research Prompt Export",
+        ],
+        limitations=[
+            "Warnings identify risk; they do not prove the data is wrong.",
+            "Some sectors naturally trip generic warnings and need sector-specific review.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "yfinance project",
+                "https://github.com/ranaroussi/yfinance",
+                "Documents the unofficial market-data library used by the app.",
+            )
+        ],
+    ),
+    KnowledgeNode(
+        title="Scenario DCF",
+        category="Valuation",
+        summary="Calculates bear, base, and bull valuation cases using editable growth, discount, and terminal assumptions.",
+        why_it_matters="A single DCF point estimate hides uncertainty; scenarios reveal the range of plausible outcomes.",
+        inputs=[
+            "Starting FCF",
+            "Scenario growth, discount, and terminal growth assumptions",
+            "Net debt, shares used, and current price",
+        ],
+        calculations=[
+            "Each scenario reuses the DCF equity bridge",
+            "Upside/downside = scenario fair value per share / current price - 1",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > Bull / Base / Bear Scenario Assumptions",
+            "Single Stock Analysis > Bull / Base / Bear DCF Scenarios",
+            "ChatGPT Research Prompt Export",
+        ],
+        limitations=[
+            "Default scenarios are generic and should be edited for the company thesis.",
+            "Scenarios do not model explicit margin, segment, or capital-allocation paths.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "Damodaran valuation data and teaching material",
+                "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html",
+                "Reference material for valuation assumptions and scenario thinking.",
+            )
+        ],
+    ),
+    KnowledgeNode(
+        title="DCF Sensitivity Analysis",
+        category="Valuation",
+        summary="Shows how base-case fair value changes as discount rate and terminal growth move around the selected case.",
+        why_it_matters="Terminal value and discount rate often drive most DCF variation, so sensitivity is essential for honest interpretation.",
+        inputs=[
+            "Base-case starting FCF and growth",
+            "Discount-rate step grid",
+            "Terminal-growth step grid",
+        ],
+        calculations=[
+            "Recalculate fair value for each discount-rate and terminal-growth pair",
+            "Mark cells invalid when terminal growth is greater than or too close to discount rate",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > DCF Sensitivity",
+            "ChatGPT Research Prompt Export",
+        ],
+        limitations=[
+            "Two-variable sensitivity still omits margin, reinvestment, and share-count uncertainty.",
+            "Large terminal values can dominate the table.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "Terminal value overview",
+                "https://pages.stern.nyu.edu/~adamodar/pdfiles/eqnotes/dcfstabl.pdf",
+                "Explains why terminal assumptions need constraints and sensitivity checks.",
+            )
+        ],
+    ),
+    KnowledgeNode(
+        title="Reverse DCF",
+        category="Valuation",
+        summary="Estimates the five-year FCF growth rate implied by the current market price under selected discount and terminal assumptions.",
+        why_it_matters="Reverse DCF reframes valuation from 'what is it worth?' to 'what must happen for today's price to make sense?'",
+        inputs=[
+            "Current price",
+            "Shares used",
+            "Net debt",
+            "Starting FCF",
+            "Discount rate, terminal growth, and projection years",
+        ],
+        calculations=[
+            "Target equity value = current price x shares used",
+            "Target enterprise value = target equity value + net debt",
+            "Solve for explicit FCF growth that makes DCF enterprise value equal target enterprise value",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > Reverse DCF",
+            "ChatGPT Research Prompt Export",
+        ],
+        limitations=[
+            "The solver searches a bounded growth range and can fail when price implies extreme assumptions.",
+            "Reverse DCF explains market-implied expectations, not whether those expectations are likely.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "Damodaran cost of capital and valuation material",
+                "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html",
+                "Background for interpreting required returns and valuation assumptions.",
+            )
+        ],
+    ),
+    KnowledgeNode(
         title="Data Sources and Fallbacks",
         category="Data Reliability",
         summary=(
