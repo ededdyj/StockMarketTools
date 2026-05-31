@@ -861,10 +861,15 @@ def render_scenario_section(scenarios: list[ScenarioValuation]):
     rows = []
     for scenario in scenarios:
         valuation = scenario.valuation
+        thesis = getattr(
+            scenario,
+            "thesis",
+            "Scenario assumptions vary growth, discount rate, and terminal growth.",
+        )
         rows.append(
             {
                 "Scenario": scenario.name,
-                "Qualitative Case": scenario.thesis,
+                "Qualitative Case": thesis,
                 "Starting FCF": format_currency(valuation.starting_fcf, 0) if valuation else "N/A",
                 "Growth": format_percent(scenario.assumptions.growth_rate, 1),
                 "Discount": format_percent(scenario.assumptions.discount_rate, 1),

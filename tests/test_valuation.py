@@ -69,6 +69,7 @@ def test_scenario_dcf_outputs_bear_base_bull_values():
     assert [result.name for result in results] == ["Bear", "Base", "Bull"]
     assert results[0].valuation.fair_value_per_share < results[1].valuation.fair_value_per_share
     assert results[2].valuation.fair_value_per_share > results[1].valuation.fair_value_per_share
+    assert results[0].thesis
 
 
 def test_sensitivity_table_marks_invalid_cells():
