@@ -92,3 +92,17 @@ def test_estimate_dynamic_dcf_assumptions_can_use_quarterly_fcf_growth_when_annu
 
     assert estimate.assumptions.growth_rate > 0
     assert any("quarterly FCF growth" in line.source for line in estimate.lines if line.assumption == "Growth rate")
+
+
+def test_estimate_dynamic_dcf_assumptions_ignores_non_dataframe_quarterly_cashflow():
+    estimate = estimate_dynamic_dcf_assumptions(
+        {"beta": 1.0, "marketCap": 1_000.0},
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        _market_inputs(),
+        quarterly_cashflow={"unexpected": "shape"},
+    )
+
+    assert estimate.assumptions.growth_rate == 0.03
+    assert estimate.warnings

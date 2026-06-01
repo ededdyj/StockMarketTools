@@ -117,6 +117,36 @@ def prefer_current_statement_frame(
     return annual_frame
 
 
+def estimate_dynamic_dcf_assumptions_safe(
+    info: Dict,
+    financials: pd.DataFrame,
+    balance_sheet: pd.DataFrame,
+    cashflow: pd.DataFrame,
+    market_inputs,
+    quarterly_cashflow: pd.DataFrame,
+) -> DynamicDcfEstimate:
+    """Estimate dynamic defaults without letting optional quarterly data crash the UI."""
+
+    try:
+        return estimate_dynamic_dcf_assumptions(
+            info,
+            financials,
+            balance_sheet,
+            cashflow,
+            market_inputs,
+            quarterly_cashflow=quarterly_cashflow,
+        )
+    except TypeError as exc:
+        logger.warning("Dynamic DCF quarterly enhancement failed; retrying annual-only defaults: %s", exc)
+        estimate = estimate_dynamic_dcf_assumptions(info, financials, balance_sheet, cashflow, market_inputs)
+        return DynamicDcfEstimate(
+            assumptions=estimate.assumptions,
+            lines=estimate.lines,
+            warnings=estimate.warnings
+            + ["Quarterly FCF growth inputs could not be processed; dynamic defaults used annual/fallback data."],
+        )
+
+
 def _set_dcf_session_state(assumptions: DcfAssumptions) -> None:
     st.session_state["dcf_discount_rate_pct"] = assumptions.discount_rate * 100
     st.session_state["dcf_growth_rate_pct"] = assumptions.growth_rate * 100
@@ -1291,13 +1321,13 @@ def single_stock_analysis(philosophy, mode_description: str):
     fundamentals = extract_fundamentals(info, valuation_balance_sheet, financials=valuation_financials)
     financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
     market_inputs = get_market_inputs()
-    dynamic_dcf = estimate_dynamic_dcf_assumptions(
+    dynamic_dcf = estimate_dynamic_dcf_assumptions_safe(
         info,
         valuation_financials,
         valuation_balance_sheet,
         cashflow,
         market_inputs,
-        quarterly_cashflow=quarterly_cashflow,
+        quarterly_cashflow,
     )
     user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions(
         dynamic_dcf.assumptions,

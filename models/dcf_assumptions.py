@@ -33,7 +33,7 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 
 def _latest_value(frame: Optional[pd.DataFrame], labels: list[str]) -> Optional[float]:
-    if frame is None or frame.empty:
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
         return None
     parsed = pd.to_datetime(frame.columns, errors="coerce")
     if parsed.notna().any():
@@ -53,7 +53,7 @@ def _latest_value(frame: Optional[pd.DataFrame], labels: list[str]) -> Optional[
 
 
 def _series(frame: Optional[pd.DataFrame], labels: list[str]) -> list[float]:
-    if frame is None or frame.empty:
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
         return []
     for label in labels:
         if label in frame.index:
