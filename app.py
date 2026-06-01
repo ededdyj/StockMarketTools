@@ -148,6 +148,45 @@ def estimate_dynamic_dcf_assumptions_safe(
         )
 
 
+def build_valuation_input_provenance_safe(
+    info: Dict,
+    fundamentals: FundamentalsSnapshot,
+    fcf_snapshot: FreeCashFlowSnapshot,
+    dynamic_estimate: Optional[DynamicDcfEstimate],
+    market_inputs,
+    financials: pd.DataFrame,
+    income_metrics,
+) -> DataFreshnessReport:
+    """Build valuation provenance without letting optional income metrics crash the UI."""
+
+    try:
+        return build_valuation_input_provenance(
+            info,
+            fundamentals,
+            fcf_snapshot,
+            dynamic_estimate,
+            market_inputs,
+            financials=financials,
+            income_metrics=income_metrics,
+        )
+    except TypeError as exc:
+        logger.warning("Income metric provenance failed; retrying without income metrics: %s", exc)
+        report = build_valuation_input_provenance(
+            info,
+            fundamentals,
+            fcf_snapshot,
+            dynamic_estimate,
+            market_inputs,
+            financials=financials,
+        )
+        return DataFreshnessReport(
+            run_timestamp=report.run_timestamp,
+            rows=report.rows,
+            warnings=report.warnings
+            + ["Income metric provenance could not be processed; revenue/net income/EPS used legacy profile/statement fallback labels."],
+        )
+
+
 def _set_dcf_session_state(assumptions: DcfAssumptions) -> None:
     st.session_state["dcf_discount_rate_pct"] = assumptions.discount_rate * 100
     st.session_state["dcf_growth_rate_pct"] = assumptions.growth_rate * 100
@@ -1420,14 +1459,14 @@ def single_stock_analysis(philosophy, mode_description: str):
             sec_warnings=sec_warnings,
             philosophy_name=philosophy.name,
         )
-        provenance_report = build_valuation_input_provenance(
+        provenance_report = build_valuation_input_provenance_safe(
             info,
             fundamentals,
             fcf_snapshot,
             dynamic_dcf,
             market_inputs,
-            financials=valuation_financials,
-            income_metrics=income_metrics,
+            valuation_financials,
+            income_metrics,
         )
         dcf_fit = calculate_dcf_fit(info, fundamentals, fcf_snapshot, dcf_warnings)
         render_data_freshness_summary(provenance_report)

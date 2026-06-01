@@ -46,7 +46,14 @@ class DataFreshnessReport:
 
 
 def parse_date(value: Optional[str]) -> Optional[pd.Timestamp]:
-    if not value:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if str(value).strip() == "":
         return None
     match = re.search(r"\d{4}-\d{2}-\d{2}", str(value))
     if match:
