@@ -46,10 +46,15 @@ not optimized to do.
     has at least one source link.
 
 - **Discounted Cash Flow (used in Single Stock and SP500 Deals)**
-  - Uses a normalized starting Free Cash Flow resolver. By default it calculates
-    `FreeCashFlow = OperatingCashFlow - abs(CapitalExpenditures)` from
-    `yfinance.cashflow`, falling back to the Yahoo `Free Cash Flow` line item
-    when operating cash flow/capex are unavailable.
+  - Uses a normalized starting Free Cash Flow resolver. Single-stock mode now
+    defaults to the best available current FCF source: SEC Companyfacts TTM for
+    U.S. companies when 10-Q/10-K data supports it, then yfinance TTM cash flow,
+    then yfinance quarterly TTM, and finally annual yfinance cash flow.
+  - FCF is calculated as `FreeCashFlow = OperatingCashFlow - abs(CapitalExpenditures)`.
+    The `abs()` treatment is intentional because data providers often report
+    capex as a negative cash-flow line even though DCF needs it as a cash outflow.
+  - SEC TTM FCF uses `latest annual FCF + current-year YTD FCF - prior-year
+    same-period YTD FCF` when quarterly/YTD 10-Q facts are available.
   - Single-stock mode also supports latest fiscal-year FCF, 3-year average FCF,
     a TTM fallback mode, and user-entered normalized FCF.
   - Projects cash flow for *n* years (default `n = 5`) with growth rate `g`.

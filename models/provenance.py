@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import re
 from typing import Optional
 
 import pandas as pd
@@ -46,6 +47,9 @@ class DataFreshnessReport:
 def parse_date(value: Optional[str]) -> Optional[pd.Timestamp]:
     if not value:
         return None
+    match = re.search(r"\d{4}-\d{2}-\d{2}", str(value))
+    if match:
+        value = match.group(0)
     parsed = pd.to_datetime(value, errors="coerce")
     if pd.isna(parsed):
         return None
@@ -151,9 +155,9 @@ def build_valuation_input_provenance(
         _make_input("Cash", fundamentals.cash_and_equivalents, fundamentals.cash_source or "Fallback/missing", "Latest balance-sheet cash field", fundamentals.balance_sheet_as_of, pulled_at, "High" if fundamentals.cash_source else "Low", "Official filing data" if fundamentals.cash_source else "Fallback estimate", "Cash missing; assumed zero." if not fundamentals.cash_source else None),
         _make_input("Total Debt", fundamentals.total_debt, fundamentals.debt_source or "Fallback/missing", "Total Debt or Short + Long Debt", fundamentals.balance_sheet_as_of, pulled_at, "High" if fundamentals.debt_source else "Low", "Official filing data" if fundamentals.debt_source else "Fallback estimate", "Debt missing; assumed zero." if not fundamentals.debt_source else None),
         _make_input("Net Debt", fundamentals.net_debt, "Computed", "total debt - cash and equivalents", fundamentals.balance_sheet_as_of, pulled_at, "Medium", "Derived estimate"),
-        _make_input("Operating Cash Flow", fcf_snapshot.operating_cash_flow, fcf_snapshot.source, "Cash flow statement operating cash flow", fcf_snapshot.period, pulled_at, "High" if fcf_snapshot.operating_cash_flow is not None else "Low", "Official filing data" if fcf_snapshot.operating_cash_flow is not None else "Fallback estimate"),
-        _make_input("Capital Expenditures", fcf_snapshot.capital_expenditures, fcf_snapshot.source, "Capex treated as cash outflow", fcf_snapshot.period, pulled_at, "High" if fcf_snapshot.capital_expenditures is not None else "Low", "Official filing data" if fcf_snapshot.capital_expenditures is not None else "Fallback estimate"),
-        _make_input("Free Cash Flow", fcf_snapshot.value, fcf_snapshot.source, fcf_snapshot.formula, fcf_snapshot.period, pulled_at, "High" if fcf_snapshot.value is not None else "Low", "Derived estimate" if fcf_snapshot.value is not None else "Fallback estimate"),
+        _make_input("Operating Cash Flow", fcf_snapshot.operating_cash_flow, fcf_snapshot.source, "Cash flow statement operating cash flow", fcf_snapshot.period, pulled_at, fcf_snapshot.confidence_level if fcf_snapshot.operating_cash_flow is not None else "Low", "Official filing data" if "SEC" in fcf_snapshot.source else "Market snapshot" if fcf_snapshot.operating_cash_flow is not None else "Fallback estimate"),
+        _make_input("Capital Expenditures", fcf_snapshot.capital_expenditures, fcf_snapshot.source, "Capex treated as cash outflow", fcf_snapshot.period, pulled_at, fcf_snapshot.confidence_level if fcf_snapshot.capital_expenditures is not None else "Low", "Official filing data" if "SEC" in fcf_snapshot.source else "Market snapshot" if fcf_snapshot.capital_expenditures is not None else "Fallback estimate"),
+        _make_input("Free Cash Flow", fcf_snapshot.value, fcf_snapshot.source, fcf_snapshot.formula, fcf_snapshot.period, pulled_at, fcf_snapshot.confidence_level if fcf_snapshot.value is not None else "Low", "Official filing data" if "SEC" in fcf_snapshot.source else "Derived estimate" if fcf_snapshot.value is not None else "Fallback estimate"),
         _make_input("Revenue", info.get("totalRevenue"), "Yahoo Finance profile", "totalRevenue", income_period, pulled_at, "Medium", "Market snapshot"),
         _make_input("Net Income", info.get("netIncomeToCommon"), "Yahoo Finance profile", "netIncomeToCommon", income_period, pulled_at, "Medium", "Market snapshot"),
         _make_input("EPS", info.get("trailingEps"), "Yahoo Finance profile", "trailingEps", income_period, pulled_at, "Medium", "Market snapshot"),

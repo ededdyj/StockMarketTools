@@ -11,6 +11,7 @@ import pandas as pd
 import requests
 
 from models.financial_health import calculate_financial_health
+from models.free_cash_flow import FreeCashFlowSnapshot, snapshot_from_sec_companyfacts
 
 
 SEC_BASE_URL = "https://data.sec.gov"
@@ -61,6 +62,11 @@ CASHFLOW_CONCEPTS = {
     "Operating Cash Flow": [
         "NetCashProvidedByUsedInOperatingActivities",
         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    ],
+    "Capital Expenditure": [
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+        "PaymentsToAcquireProductiveAssets",
+        "PaymentsForProceedsFromProductiveAssets",
     ],
 }
 
@@ -190,6 +196,23 @@ def get_sec_financial_health_statements(ticker: str) -> SecFinancialStatements:
         return statements_from_companyfacts(payload, cik=cik)
     except Exception as exc:
         return SecFinancialStatements(warnings=[f"SEC EDGAR fallback failed for {ticker}: {exc}"])
+
+
+@lru_cache(maxsize=512)
+def get_sec_free_cash_flow_snapshot(ticker: str) -> tuple[Optional[FreeCashFlowSnapshot], list[str]]:
+    """Return the best SEC Companyfacts FCF snapshot available for a ticker."""
+
+    try:
+        cik = ticker_to_cik(ticker)
+        if not cik:
+            return None, [f"No SEC CIK found for {ticker}."]
+        payload = _request_json(f"{SEC_BASE_URL}/api/xbrl/companyfacts/CIK{cik}.json")
+        snapshot = snapshot_from_sec_companyfacts(payload, cik=cik)
+        if snapshot is None:
+            return None, [f"SEC EDGAR companyfacts did not include enough cash-flow fields for {ticker}."]
+        return snapshot, []
+    except Exception as exc:
+        return None, [f"SEC EDGAR FCF lookup failed for {ticker}: {exc}"]
 
 
 def merge_statement_frame(primary: Optional[pd.DataFrame], fallback: Optional[pd.DataFrame]) -> pd.DataFrame:

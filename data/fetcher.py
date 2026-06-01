@@ -1,7 +1,15 @@
 import yfinance as yf
 import pandas as pd
 
-from data.sec_facts import add_sec_fallback_to_statements
+from data.sec_facts import add_sec_fallback_to_statements, get_sec_free_cash_flow_snapshot
+
+
+def _safe_statement_frame(stock, attribute: str) -> pd.DataFrame:
+    try:
+        frame = getattr(stock, attribute, pd.DataFrame())
+    except Exception:
+        return pd.DataFrame()
+    return frame if isinstance(frame, pd.DataFrame) else pd.DataFrame()
 
 def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
     """
@@ -26,9 +34,12 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
             # Pass all parameters in timeframe directly
             history = stock.history(**timeframe)
 
-        financials = stock.financials
-        cashflow = stock.cashflow  # Typically a DataFrame with financial periods as columns
-        balance_sheet = stock.balance_sheet
+        financials = _safe_statement_frame(stock, "financials")
+        cashflow = _safe_statement_frame(stock, "cashflow")  # Typically annual periods as columns
+        quarterly_cashflow = _safe_statement_frame(stock, "quarterly_cashflow")
+        ttm_cashflow = _safe_statement_frame(stock, "ttm_cashflow")
+        balance_sheet = _safe_statement_frame(stock, "balance_sheet")
+        sec_fcf_snapshot, sec_fcf_warnings = get_sec_free_cash_flow_snapshot(ticker)
         (
             financials,
             balance_sheet,
@@ -41,9 +52,12 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
             "history": history,
             "financials": financials,
             "cashflow": cashflow,
+            "quarterly_cashflow": quarterly_cashflow,
+            "ttm_cashflow": ttm_cashflow,
+            "sec_fcf_snapshot": sec_fcf_snapshot,
             "balance_sheet": balance_sheet,
             "financial_health_source": financial_health_source,
-            "sec_warnings": sec_warnings,
+            "sec_warnings": sec_warnings + sec_fcf_warnings,
         }
     except Exception as e:
         print(f"Error fetching data for {ticker}: {e}")

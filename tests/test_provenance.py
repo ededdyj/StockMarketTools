@@ -15,6 +15,7 @@ from utils.fundamentals import FundamentalsSnapshot
 
 def test_parse_date_age_and_freshness_labels():
     assert parse_date("2026-01-31") is not None
+    assert parse_date("TTM through 2026-06-27") == pd.Timestamp("2026-06-27")
     assert parse_date("not-a-date") is None
     now = pd.Timestamp("2026-05-31")
     assert age_in_days("2026-05-01", now=now) == 30

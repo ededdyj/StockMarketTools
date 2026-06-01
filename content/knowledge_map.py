@@ -388,9 +388,14 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
     KnowledgeNode(
         title="Free Cash Flow Normalization",
         category="Valuation Inputs",
-        summary="Calculates starting FCF consistently from operating cash flow and capital expenditures, while supporting average and user-normalized inputs.",
+        summary="Calculates starting FCF consistently from operating cash flow and capital expenditures, preferring current SEC or TTM data before annual fallbacks.",
         why_it_matters="Capex sign conventions differ across data providers; inconsistent treatment can overstate or understate FCF.",
         inputs=[
+            "SEC Companyfacts operating cash flow and payments for property, plant, and equipment",
+            "Current-year and prior-year same-period 10-Q/YTD cash-flow facts",
+            "yfinance TTM cash-flow frame",
+            "yfinance quarterly cash-flow frame",
+            "yfinance annual cash-flow frame",
             "Operating cash flow",
             "Capital expenditures",
             "Yahoo Free Cash Flow line item fallback",
@@ -398,15 +403,19 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
         calculations=[
             "Free cash flow = operating cash flow - abs(capital expenditures)",
+            "SEC TTM FCF = latest annual FCF + current-year YTD FCF - prior-year same-period YTD FCF",
+            "yfinance quarterly TTM FCF = sum of the latest four quarterly FCF values",
             "3-year average FCF = average of latest three resolved annual FCF values",
-            "TTM mode falls back to latest fiscal year when reliable quarterly data is unavailable",
+            "Annual fallback is used only when SEC, TTM, and quarterly data are unavailable or incomplete",
         ],
         transparency_surfaces=[
             "Sidebar DCF Starting FCF controls",
             "DCF Equity Bridge",
             "Assumptions & Data source metadata",
+            "Data Timing & Freshness warnings when annual fallback data is stale",
         ],
         limitations=[
+            "SEC Companyfacts concepts vary by filer, so some companies will still require yfinance or annual fallback data.",
             "TTM FCF needs reliable quarterly data, which yfinance may not provide consistently.",
             "Normalized FCF overrides depend on user judgment.",
         ],
@@ -415,6 +424,11 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
                 "SEC guide to financial statements",
                 "https://www.investor.gov/introduction-investing/getting-started/researching-investments/how-read-10-k10-q",
                 "Explains the role of financial statements and filings in company analysis.",
+            ),
+            KnowledgeSource(
+                "SEC Companyfacts API",
+                "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+                "Official source for machine-readable company filing facts used for SEC fallback data.",
             )
         ],
     ),

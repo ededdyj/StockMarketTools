@@ -173,11 +173,16 @@ def get_user_dcf_assumptions(
     return assumptions, is_valid, message
 
 
-def get_user_fcf_selection(cashflow: pd.DataFrame) -> FreeCashFlowSnapshot:
+def get_user_fcf_selection(
+    cashflow: pd.DataFrame,
+    quarterly_cashflow: pd.DataFrame | None = None,
+    ttm_cashflow: pd.DataFrame | None = None,
+    sec_fcf_snapshot: FreeCashFlowSnapshot | None = None,
+) -> FreeCashFlowSnapshot:
     with st.sidebar.expander("DCF Starting FCF", expanded=False):
         method_label = st.selectbox(
             "Starting FCF Source",
-            ["Latest fiscal year", "3-year average", "TTM fallback", "User-entered normalized FCF"],
+            ["Best available current FCF", "Latest fiscal year", "3-year average", "TTM fallback", "User-entered normalized FCF"],
             help="The DCF starts from this free-cash-flow value before applying growth assumptions.",
         )
         user_fcf = None
@@ -191,6 +196,7 @@ def get_user_fcf_selection(cashflow: pd.DataFrame) -> FreeCashFlowSnapshot:
                 format="%.0f",
             )
         method_map = {
+            "Best available current FCF": "best_available",
             "Latest fiscal year": "latest_fiscal_year",
             "3-year average": "three_year_average",
             "TTM fallback": "ttm",
@@ -200,6 +206,9 @@ def get_user_fcf_selection(cashflow: pd.DataFrame) -> FreeCashFlowSnapshot:
         cashflow,
         method=method_map[method_label],
         user_normalized_fcf=user_fcf if method_label == "User-entered normalized FCF" else None,
+        quarterly_cashflow=quarterly_cashflow,
+        ttm_cashflow=ttm_cashflow,
+        sec_fcf_snapshot=sec_fcf_snapshot,
     )
 
 
@@ -1246,6 +1255,9 @@ def single_stock_analysis(philosophy, mode_description: str):
     history = data.get("history", pd.DataFrame())
     financials = data.get("financials", pd.DataFrame())
     cashflow = data.get("cashflow", pd.DataFrame())
+    quarterly_cashflow = data.get("quarterly_cashflow", pd.DataFrame())
+    ttm_cashflow = data.get("ttm_cashflow", pd.DataFrame())
+    sec_fcf_snapshot = data.get("sec_fcf_snapshot")
     balance_sheet = data.get("balance_sheet")
     financial_health_source = data.get("financial_health_source", "Yahoo Finance")
     sec_warnings = data.get("sec_warnings", [])
@@ -1265,7 +1277,7 @@ def single_stock_analysis(philosophy, mode_description: str):
         state_key=f"single-stock:{ticker}",
         reset_label="Reset to dynamic defaults",
     )
-    fcf_snapshot = get_user_fcf_selection(cashflow)
+    fcf_snapshot = get_user_fcf_selection(cashflow, quarterly_cashflow, ttm_cashflow, sec_fcf_snapshot)
 
     warn_if_data_missing(info, history, cashflow, ticker)
 
