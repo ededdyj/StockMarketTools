@@ -55,9 +55,10 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
             "quarterly_cashflow": quarterly_cashflow,
             "ttm_cashflow": ttm_cashflow,
             "sec_fcf_snapshot": sec_fcf_snapshot,
+            "sec_fcf_warnings": sec_fcf_warnings,
             "balance_sheet": balance_sheet,
             "financial_health_source": financial_health_source,
-            "sec_warnings": sec_warnings + sec_fcf_warnings,
+            "sec_warnings": sec_warnings,
         }
     except Exception as e:
         print(f"Error fetching data for {ticker}: {e}")
