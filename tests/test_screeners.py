@@ -96,6 +96,8 @@ def test_quality_value_screener_includes_financial_health(monkeypatch):
     monkeypatch.setattr(quality_value_screener.st.sidebar, "subheader", lambda label: None)
     monkeypatch.setattr(quality_value_screener.st.sidebar, "selectbox", lambda *args, **kwargs: "Dow 30")
     monkeypatch.setattr(quality_value_screener.st.sidebar, "file_uploader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(quality_value_screener.st.sidebar, "number_input", lambda *args, **kwargs: kwargs.get("value"))
+    monkeypatch.setattr(quality_value_screener.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(quality_value_screener.st, "progress", lambda value: _Progress())
     monkeypatch.setattr(quality_value_screener.yf, "Ticker", lambda ticker: _Stock())
     monkeypatch.setattr(
@@ -123,3 +125,27 @@ def test_quality_value_screener_includes_financial_health(monkeypatch):
     assert row["Financial Health Available Signals"] == 9
     assert row["Financial Health Score"] == 1
     assert "Positive ROA: Pass" in row["Financial Health Details"]
+
+
+def test_quality_value_screener_stops_after_repeated_rate_limits(monkeypatch):
+    class RateLimitedStock:
+        @property
+        def info(self):
+            raise Exception("Too Many Requests. Rate limited. Try after a while.")
+
+    monkeypatch.setattr(quality_value_screener, "get_tickers", lambda universe, uploaded_file: ["AAA", "BBB", "CCC", "DDD"])
+    monkeypatch.setattr(quality_value_screener.st.sidebar, "subheader", lambda label: None)
+    monkeypatch.setattr(quality_value_screener.st.sidebar, "selectbox", lambda *args, **kwargs: "Dow 30")
+    monkeypatch.setattr(quality_value_screener.st.sidebar, "file_uploader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(quality_value_screener.st.sidebar, "number_input", lambda *args, **kwargs: kwargs.get("value"))
+    monkeypatch.setattr(quality_value_screener.st, "progress", lambda value: _Progress())
+    monkeypatch.setattr(quality_value_screener.st, "warning", lambda message: None)
+    monkeypatch.setattr(quality_value_screener.st, "caption", lambda message: None)
+    monkeypatch.setattr(quality_value_screener.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(quality_value_screener.yf, "Ticker", lambda ticker: RateLimitedStock())
+
+    result = quality_value_screener.analyze_quality_value_screener()
+
+    reasons = [skip.reason for skip in result.skipped]
+    assert reasons[:3] == ["rate_limited", "rate_limited", "rate_limited"]
+    assert reasons[3:] == ["not_run_rate_limit_stop"]

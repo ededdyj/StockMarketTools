@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+import time
 from typing import List
 
 import pandas as pd
@@ -69,6 +70,9 @@ QUALITY_WEIGHT = DEFAULT_OTHER_WEIGHTS[0] * scale
 GROWTH_WEIGHT = DEFAULT_OTHER_WEIGHTS[1] * scale
 STABILITY_WEIGHT = DEFAULT_OTHER_WEIGHTS[2] * scale
 SCREENER_DCF_ASSUMPTIONS = DcfAssumptions.defaults()
+DEFAULT_MAX_TICKERS_PER_RUN = 60
+DEFAULT_REQUEST_DELAY_SECONDS = 0.5
+RATE_LIMIT_STOP_AFTER = 3
 
 # ---------------------------------------------------------------------------
 # 2. Ticker‑list loader
@@ -110,6 +114,28 @@ def get_tickers(universe: str, uploaded_file=None) -> List[str]:
         st.error(f"Error loading {universe} tickers: {e}")
         return []
 
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in [
+            "too many requests",
+            "rate limited",
+            "rate limit",
+            "429",
+            "try after a while",
+        ]
+    )
+
+
+def _safe_statement_frame(stock, attribute: str) -> pd.DataFrame:
+    try:
+        frame = getattr(stock, attribute, pd.DataFrame())
+    except Exception:
+        return pd.DataFrame()
+    return frame if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+
 # ---------------------------------------------------------------------------
 # 3. Main Streamlit entry point
 # ---------------------------------------------------------------------------
@@ -127,26 +153,68 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
     default_index = options.index("Dow 30") if "Dow 30" in options else 0
     universe = st.sidebar.selectbox("Choose a list of tickers", options, index=default_index)
     uploaded_file = st.sidebar.file_uploader("…or upload a CSV with tickers", type="csv")
+    max_tickers = int(
+        st.sidebar.number_input(
+            "Max tickers this run",
+            min_value=1,
+            max_value=500,
+            value=min(DEFAULT_MAX_TICKERS_PER_RUN, 500),
+            step=10,
+            help="Yahoo Finance rate-limits large batch screens. Run smaller batches and wait between runs.",
+        )
+    )
+    start_at = int(
+        st.sidebar.number_input(
+            "Start at ticker #",
+            min_value=1,
+            max_value=500,
+            value=1,
+            step=1,
+            help="Use this to continue a large universe in chunks after the previous run completes.",
+        )
+    )
+    request_delay = float(
+        st.sidebar.number_input(
+            "Delay between Yahoo calls (sec)",
+            min_value=0.0,
+            max_value=10.0,
+            value=DEFAULT_REQUEST_DELAY_SECONDS,
+            step=0.25,
+            help="Higher values reduce rate-limit risk but make the screener slower.",
+        )
+    )
 
     tickers = get_tickers(universe, uploaded_file)
     if not tickers:
         st.warning("No tickers found for the selected universe.")
         return BatchAnalysisResult(None)
+    original_total = len(tickers)
+    tickers = tickers[start_at - 1 : start_at - 1 + max_tickers]
+    if not tickers:
+        st.warning("Start position is beyond the selected ticker list.")
+        return BatchAnalysisResult(None)
+    st.caption(
+        f"Screening {len(tickers)} of {original_total} tickers. "
+        "Yahoo Finance can rate-limit large runs; use smaller chunks if rate limits appear."
+    )
 
     # ── Analysis loop ───────────────────────────────────────────────────
     results = []
     skipped = []
     progress_bar = st.progress(0)
     total = len(tickers)
+    consecutive_rate_limits = 0
 
     for i, ticker in enumerate(tickers):
         try:
+            if request_delay and i > 0:
+                time.sleep(request_delay)
             stock = yf.Ticker(ticker)
             info = stock.info or {}
             current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-            financials = stock.financials
-            cashflow = stock.cashflow
-            balance_sheet = stock.balance_sheet
+            financials = _safe_statement_frame(stock, "financials")
+            cashflow = _safe_statement_frame(stock, "cashflow")
+            balance_sheet = _safe_statement_frame(stock, "balance_sheet")
 
             # Skip if we cannot price the security at all
             if current_price is None:
@@ -222,9 +290,28 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
                     [*fundamentals.note_tags, *sec_warnings]
                 ) if fundamentals.note_tags or sec_warnings else "",
             })
+            consecutive_rate_limits = 0
         except Exception as exc:
-            logger.exception("Failed to analyze quality/value ticker %s", ticker)
-            skipped.append(SkippedTicker(ticker, "exception", str(exc)))
+            if _is_rate_limit_error(exc):
+                logger.warning("Yahoo rate limit while analyzing %s: %s", ticker, exc)
+                skipped.append(SkippedTicker(ticker, "rate_limited", str(exc)))
+                consecutive_rate_limits += 1
+                if consecutive_rate_limits >= RATE_LIMIT_STOP_AFTER:
+                    remaining = tickers[i + 1 :]
+                    skipped.extend(
+                        SkippedTicker(symbol, "not_run_rate_limit_stop", "Stopped after repeated Yahoo rate-limit responses.")
+                        for symbol in remaining
+                    )
+                    st.warning(
+                        "Yahoo Finance is rate-limiting this screener run. "
+                        f"Stopped after {consecutive_rate_limits} consecutive rate-limit responses. "
+                        "Wait a while, increase the delay, or resume with a later Start at ticker # value."
+                    )
+                    break
+            else:
+                logger.exception("Failed to analyze quality/value ticker %s", ticker)
+                skipped.append(SkippedTicker(ticker, "exception", str(exc)))
+                consecutive_rate_limits = 0
         finally:
             progress_bar.progress((i + 1) / total)
 
