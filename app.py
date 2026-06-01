@@ -39,8 +39,9 @@ from utils.dividends import estimate_annual_dividend_income
 from content.knowledge_map import get_knowledge_nodes
 from content.research_prompt import StockResearchPromptInputs, build_stock_research_prompt
 
-st.set_page_config(page_title="Eddy's Stocks Dashboard", layout="wide")
-st.title("Eddy's Stocks - Personal Financial Dashboard")
+st.set_page_config(page_title="ESMT", layout="wide")
+st.title("ESMT")
+st.caption("Eddy's Stock Market Tools")
 
 logger = get_logger(__name__)
 
