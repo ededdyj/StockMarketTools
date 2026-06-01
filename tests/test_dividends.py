@@ -1,4 +1,5 @@
-from utils.dividends import estimate_annual_dividend_income, resolve_dividend_yield
+from models.dividend_yield import resolve_dividend_yield
+from utils.dividends import estimate_annual_dividend_income
 
 
 def test_estimate_annual_dividend_income_uses_yield_directly():

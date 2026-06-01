@@ -13,6 +13,7 @@ from data.market_inputs import get_market_inputs
 from models.dcf_fit import DcfFitResult, calculate_dcf_fit
 from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assumptions
 from models.dcf_warnings import DcfWarning, generate_dcf_warnings
+from models.dividend_yield import resolve_dividend_yield
 from models.free_cash_flow import FreeCashFlowSnapshot, resolve_free_cash_flow
 from models.provenance import DataFreshnessReport, build_valuation_input_provenance
 from models.valuation import (
@@ -33,7 +34,7 @@ from analysis.quality_value_screener import analyze_quality_value_screener
 from config.philosophies import get_philosophy_options, get_philosophy
 from utils.logger import get_logger, read_recent_logs
 from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
-from utils.dividends import estimate_annual_dividend_income, resolve_dividend_yield
+from utils.dividends import estimate_annual_dividend_income
 from content.knowledge_map import get_knowledge_nodes
 from content.research_prompt import StockResearchPromptInputs, build_stock_research_prompt
 

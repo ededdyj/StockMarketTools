@@ -9,9 +9,9 @@ from typing import Optional
 import pandas as pd
 
 from models.dcf_assumptions import DynamicDcfEstimate
+from models.dividend_yield import resolve_dividend_yield
 from models.free_cash_flow import FreeCashFlowSnapshot
 from models.valuation import DcfAssumptions
-from utils.dividends import resolve_dividend_yield
 from utils.fundamentals import FundamentalsSnapshot
 
 
