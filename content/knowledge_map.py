@@ -578,10 +578,13 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
             "Freshness labels: Fresh 0-45 days, Recent 46-120 days, Stale 121-365 days, Very stale over 365 days, Unknown when date is unavailable",
             "TTM revenue/net income = sum of latest four quarterly income-statement values; EPS = TTM net income / shares used when reported EPS is unavailable",
             "Warnings when current market data is mixed with cash-flow data older than 120 days or statement dates cannot be parsed",
+            "Warnings when an earnings timestamp is later than the statement period used by the valuation",
+            "Cash-flow quality warnings compare TTM OCF to TTM net income when TTM income is available",
         ],
         transparency_surfaces=[
             "Single Stock Analysis > Data Timing & Freshness",
             "Assumptions & Data > Source Metadata and Freshness",
+            "DCF Data-Quality Warnings",
             "ChatGPT Research Prompt Export > Data Timing & Freshness",
         ],
         limitations=[

@@ -307,7 +307,10 @@ def get_user_fcf_selection(
 def get_user_scenario_assumptions(base: DcfAssumptions) -> dict[str, DcfAssumptions]:
     scenarios = default_scenarios(base)
     with st.expander("Bull / Base / Bear Scenario Assumptions", expanded=False):
-        st.caption("Each scenario reuses the same starting FCF, net debt, and share count; edit rates to stress-test valuation.")
+        st.caption(
+            "Each scenario reuses the same starting FCF, net debt, and share count; edit rates to stress-test valuation. "
+            "These editable scenario controls are separate from the headline DCF sidebar assumptions."
+        )
         for name, defaults in list(scenarios.items()):
             cols = st.columns(3)
             with cols[0]:
@@ -966,9 +969,34 @@ def render_share_diagnostics(fundamentals: FundamentalsSnapshot):
             st.warning("\n".join(resolution.warnings))
 
 
-def render_scenario_section(scenarios: list[ScenarioValuation]):
+def render_scenario_section(
+    scenarios: list[ScenarioValuation],
+    active_assumptions: Optional[DcfAssumptions] = None,
+    active_valuation: Optional[ValuationResult] = None,
+):
     st.subheader("Bull / Base / Bear DCF Scenarios")
+    if active_assumptions and active_valuation:
+        st.caption(
+            "The headline DCF above uses the active sidebar assumptions. "
+            "The scenario table below is editable and may differ if scenario controls were changed."
+        )
     rows = []
+    if active_assumptions and active_valuation:
+        rows.append(
+            {
+                "Scenario": "Active DCF",
+                "Qualitative Case": "Headline valuation using the current DCF sidebar assumptions.",
+                "Starting FCF": format_currency(active_valuation.starting_fcf, 0),
+                "Growth": format_percent(active_assumptions.growth_rate, 1),
+                "Discount": format_percent(active_assumptions.discount_rate, 1),
+                "Terminal Growth": format_percent(active_assumptions.terminal_growth_rate, 1),
+                "Net Debt": format_currency(active_valuation.net_debt, 0),
+                "Shares Used": format_int(active_valuation.shares_used),
+                "Fair Value / Share": format_currency(active_valuation.fair_value_per_share),
+                "Upside / Downside": "N/A",
+                "Warnings": "",
+            }
+        )
     for scenario in scenarios:
         valuation = scenario.valuation
         thesis = getattr(
@@ -978,7 +1006,7 @@ def render_scenario_section(scenarios: list[ScenarioValuation]):
         )
         rows.append(
             {
-                "Scenario": scenario.name,
+                "Scenario": f"{scenario.name} Scenario",
                 "Qualitative Case": thesis,
                 "Starting FCF": format_currency(valuation.starting_fcf, 0) if valuation else "N/A",
                 "Growth": format_percent(scenario.assumptions.growth_rate, 1),
@@ -1081,7 +1109,7 @@ def render_dcf_section(
 
     render_equity_bridge(valuation, fundamentals)
     render_share_diagnostics(fundamentals)
-    render_scenario_section(scenarios)
+    render_scenario_section(scenarios, assumptions, valuation)
     render_sensitivity_section(sensitivity)
     st.subheader("Reverse DCF")
     st.write(reverse_dcf.message)
@@ -1456,6 +1484,7 @@ def single_stock_analysis(philosophy, mode_description: str):
             dynamic_estimate=dynamic_dcf,
             financials=valuation_financials,
             cashflow=cashflow,
+            income_metrics=income_metrics,
             sec_warnings=sec_warnings,
             philosophy_name=philosophy.name,
         )

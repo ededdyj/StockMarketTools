@@ -11,6 +11,7 @@ import pandas as pd
 from models.dcf_assumptions import DynamicDcfEstimate
 from models.dividend_yield import resolve_dividend_yield
 from models.free_cash_flow import FreeCashFlowSnapshot
+from models.income_metrics import IncomeMetricsSnapshot
 from models.valuation import DcfAssumptions
 from utils.fundamentals import FundamentalsSnapshot
 
@@ -57,6 +58,18 @@ def _balance_sheet_stale(as_of: Optional[str], max_age_days: int = 550) -> bool:
     return (now - parsed.tz_localize(None)).days > max_age_days
 
 
+def _timestamp_to_date(value) -> Optional[pd.Timestamp]:
+    if value is None:
+        return None
+    try:
+        parsed = pd.to_datetime(value, unit="s", errors="coerce")
+    except (TypeError, ValueError):
+        parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return pd.Timestamp(parsed).tz_localize(None) if pd.Timestamp(parsed).tzinfo else pd.Timestamp(parsed)
+
+
 def generate_dcf_warnings(
     info: dict,
     fundamentals: FundamentalsSnapshot,
@@ -65,6 +78,7 @@ def generate_dcf_warnings(
     dynamic_estimate: Optional[DynamicDcfEstimate] = None,
     financials: Optional[pd.DataFrame] = None,
     cashflow: Optional[pd.DataFrame] = None,
+    income_metrics: Optional[IncomeMetricsSnapshot] = None,
     sec_warnings: Optional[list[str]] = None,
     philosophy_name: str = "",
 ) -> list[DcfWarning]:
@@ -128,6 +142,20 @@ def generate_dcf_warnings(
     if _balance_sheet_stale(fundamentals.balance_sheet_as_of):
         _add(warnings, "Medium", "Freshness", f"Balance sheet date {fundamentals.balance_sheet_as_of} appears stale.")
 
+    latest_statement_date = pd.to_datetime(fundamentals.balance_sheet_as_of, errors="coerce")
+    earnings_date = _timestamp_to_date(info.get("earningsTimestamp") or info.get("earningsTimestampStart"))
+    if earnings_date is not None and not pd.isna(latest_statement_date):
+        latest_statement_date = pd.Timestamp(latest_statement_date)
+        if latest_statement_date.tzinfo:
+            latest_statement_date = latest_statement_date.tz_localize(None)
+        if earnings_date.date() > latest_statement_date.date():
+            _add(
+                warnings,
+                "Medium",
+                "Freshness",
+                f"Latest earnings timestamp ({earnings_date.strftime('%Y-%m-%d')}) is after the statement period used ({latest_statement_date.strftime('%Y-%m-%d')}); verify newer earnings releases, guidance, and filings before relying on the DCF.",
+            )
+
     if "ASSUMED_CASH_ZERO" in fundamentals.note_tags:
         _add(warnings, "Medium", "Inputs", "Cash field missing; app assumed cash and equivalents are zero.")
     if "ASSUMED_DEBT_ZERO" in fundamentals.note_tags:
@@ -138,12 +166,13 @@ def generate_dcf_warnings(
     elif fcf_snapshot.value <= 0:
         _add(warnings, "High", "FCF", f"Starting free cash flow is non-positive ({fcf_snapshot.value:,.0f}).")
 
-    net_income = _latest_value(financials, ["Net Income", "Net Income Common Stockholders"])
+    net_income = income_metrics.net_income if income_metrics and income_metrics.net_income is not None else _latest_value(financials, ["Net Income", "Net Income Common Stockholders"])
     operating_cf = fcf_snapshot.operating_cash_flow if fcf_snapshot else _latest_value(cashflow, ["Operating Cash Flow", "Total Cash From Operating Activities"])
     if net_income and operating_cf is not None:
         gap = abs(operating_cf - net_income) / max(abs(net_income), 1.0)
         if gap > 0.50:
-            _add(warnings, "Medium", "Quality", f"Operating cash flow differs from net income by {gap:.1%}; inspect accrual quality and working capital.")
+            period_note = f" using {income_metrics.source}" if income_metrics else ""
+            _add(warnings, "Medium", "Quality", f"Operating cash flow differs from net income by {gap:.1%}{period_note}; inspect accrual quality and working capital.")
 
     if financials is not None and not financials.empty:
         share_values = []

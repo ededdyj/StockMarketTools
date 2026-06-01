@@ -117,8 +117,11 @@ not optimized to do.
     suspicious dividend yield/payout ratio, negative book value, share-count
     mismatches, clamped growth assumptions, terminal-growth/discount-rate risk,
     stale balance sheets, missing cash/debt fallbacks, negative/missing FCF,
-    cash-flow/net-income gaps, major share-count changes, and SEC fallback
-    issues.
+    cash-flow/net-income gaps, major share-count changes, newer earnings
+    timestamps after the statement period used, and SEC fallback issues.
+  - Cash-flow/net-income warnings compare TTM operating cash flow to TTM net
+    income when the income resolver can build TTM income; otherwise they fall
+    back to the latest available income statement value.
   - “Assumptions & Data” includes source metadata for major valuation inputs:
     price, market cap, shares used, implied shares, cash, debt, net debt,
     operating cash flow, capex, FCF, revenue, beta, risk-free rate, equity risk
@@ -135,6 +138,9 @@ not optimized to do.
   - Single-stock mode shows a compact Data Timing & Freshness summary and warns
     when current market data is mixed with annual financial statement data older
     than 120 days.
+  - Scenario tables include an "Active DCF" row for the headline valuation, then
+    separate editable Bear/Base/Bull scenario rows so user-edited scenario
+    controls are not confused with the active sidebar assumptions.
   - DCF Fit labels the model suitability as High, Medium, or Low based on FCF
     availability, warning severity, share reliability, fallbacks, and whether the
     company type often requires a specialized model.
