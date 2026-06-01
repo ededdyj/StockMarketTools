@@ -202,14 +202,25 @@ def get_user_fcf_selection(
             "TTM fallback": "ttm",
             "User-entered normalized FCF": "user_override",
         }
-    return resolve_free_cash_flow(
-        cashflow,
-        method=method_map[method_label],
-        user_normalized_fcf=user_fcf if method_label == "User-entered normalized FCF" else None,
-        quarterly_cashflow=quarterly_cashflow,
-        ttm_cashflow=ttm_cashflow,
-        sec_fcf_snapshot=sec_fcf_snapshot,
-    )
+    method = method_map[method_label]
+    user_override = user_fcf if method_label == "User-entered normalized FCF" else None
+    try:
+        return resolve_free_cash_flow(
+            cashflow,
+            method=method,
+            user_normalized_fcf=user_override,
+            quarterly_cashflow=quarterly_cashflow,
+            ttm_cashflow=ttm_cashflow,
+            sec_fcf_snapshot=sec_fcf_snapshot,
+        )
+    except TypeError as exc:
+        logger.warning("Enhanced FCF resolver failed; falling back to annual cash flow: %s", exc)
+        st.warning(
+            "The enhanced FCF source selector could not process the latest data shape. "
+            "Using annual cash-flow fallback for this run."
+        )
+        fallback_method = "user_override" if method == "user_override" else "latest_fiscal_year"
+        return resolve_free_cash_flow(cashflow, method=fallback_method, user_normalized_fcf=user_override)
 
 
 def get_user_scenario_assumptions(base: DcfAssumptions) -> dict[str, DcfAssumptions]:

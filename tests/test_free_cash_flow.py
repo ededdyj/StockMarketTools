@@ -140,6 +140,23 @@ def test_resolve_free_cash_flow_yfinance_quarterly_handles_negative_capex():
     assert snapshot.capital_expenditures == -10.0
 
 
+def test_resolve_free_cash_flow_ignores_non_dataframe_optional_inputs():
+    annual = pd.DataFrame(
+        {"2025-12-31": [100.0, -10.0]},
+        index=["Operating Cash Flow", "Capital Expenditure"],
+    )
+
+    snapshot = resolve_free_cash_flow(
+        annual,
+        method="best_available",
+        quarterly_cashflow={"not": "a dataframe"},
+        ttm_cashflow=object(),
+    )
+
+    assert snapshot.value == 90.0
+    assert "annual fallback" in snapshot.source
+
+
 def _sec_fact(start, end, value, fp, fy, form):
     return {
         "start": start,

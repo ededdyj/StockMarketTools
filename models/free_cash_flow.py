@@ -39,7 +39,7 @@ class FreeCashFlowSnapshot:
 
 
 def _ordered_columns(frame: Optional[pd.DataFrame]) -> list:
-    if frame is None or frame.empty:
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
         return []
     columns = list(frame.columns)
     parsed = pd.to_datetime(columns, errors="coerce")
@@ -50,7 +50,7 @@ def _ordered_columns(frame: Optional[pd.DataFrame]) -> list:
 
 
 def _value(frame: Optional[pd.DataFrame], labels: list[str], column) -> Optional[float]:
-    if frame is None or frame.empty or column is None:
+    if not isinstance(frame, pd.DataFrame) or frame.empty or column is None:
         return None
     if column not in frame.columns:
         return None
