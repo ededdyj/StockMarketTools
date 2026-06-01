@@ -66,3 +66,22 @@ def test_share_count_resolver_reports_missing_shares():
     assert result.selected_shares is None
     assert result.data_quality_risk
     assert "per-share valuation disabled" in result.warnings[0]
+
+
+def test_share_count_resolver_prefers_current_yahoo_over_stale_diluted_average_when_consistent():
+    info = {
+        "sharesOutstanding": 14_687_000_000,
+        "impliedSharesOutstanding": 14_690_000_000,
+        "marketCap": 2_937_400_000_000,
+        "currentPrice": 200,
+    }
+    financials = pd.DataFrame(
+        {"2025-09-30": [15_005_000_000]},
+        index=["Diluted Average Shares"],
+    )
+
+    result = resolve_share_count(info, financials=financials)
+
+    assert result.selected_shares == 14_687_000_000
+    assert result.selected_shares_source == "Yahoo Finance sharesOutstanding"
+    assert any("diluted weighted-average shares" in warning for warning in result.warnings)

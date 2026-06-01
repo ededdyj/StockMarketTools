@@ -6,6 +6,7 @@ from data.sec_facts import (
     merge_statement_frame,
     sec_headers,
     statements_from_companyfacts,
+    ticker_to_cik,
 )
 
 
@@ -145,6 +146,15 @@ def test_sec_headers_allow_configurable_user_agent(monkeypatch):
 
     assert headers["User-Agent"] == "StockMarketTools Test test@example.com"
     assert headers["Accept"] == "application/json"
+
+
+def test_ticker_to_cik_uses_static_common_ticker_map_without_sec_request(monkeypatch):
+    monkeypatch.setattr(
+        "data.sec_facts._ticker_to_cik_map",
+        lambda: (_ for _ in ()).throw(AssertionError("SEC ticker map should not be requested")),
+    )
+
+    assert ticker_to_cik("AAPL") == "0000320193"
 
 
 def test_add_sec_fallback_suppresses_warning_when_sec_supplies_no_data(monkeypatch):

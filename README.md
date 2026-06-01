@@ -86,20 +86,24 @@ not optimized to do.
     and is clamped to 0.60-2.00. Debt/equity weights use market cap and latest
     debt when available.
   - Dynamic growth defaults blend usable recent Free Cash Flow growth and
-    revenue growth, then clamp the result to 0%-12%. If positive growth history
-    is not usable, the app falls back to 3%.
+    revenue growth, then clamp the result to 0%-12%. If annual FCF is missing,
+    the app can use quarterly operating-cash-flow/capex history before falling
+    back to 3%.
   - Dynamic terminal growth is capped conservatively at the minimum of the
     long-term risk-free rate, 3%, and `discount_rate - 1%`.
   - The DCF “Assumptions & Data” expander shows the generated value, source, and
     formula for every dynamic assumption so the defaults remain auditable.
 
 - **Net Debt & Shares Fallbacks**
-  - Cash and debt line items fall back to zero with a warning if Yahoo Finance
-    omits them. The “Assumptions & Data” expander shows which fields were used
-    and the balance-sheet “as-of” date.
+  - Cash and debt line items prefer yfinance quarterly balance-sheet data when
+    available, then fall back to annual balance-sheet data, and finally to zero
+    with a warning if Yahoo Finance omits them. The “Assumptions & Data”
+    expander shows which fields were used and the balance-sheet “as-of” date.
   - Shares are resolved from filing-derived diluted/common share counts,
     `sharesOutstanding`, `impliedSharesOutstanding`, and
-    `marketCap / currentPrice`. The app compares all candidates and warns when
+    `marketCap / currentPrice`. Stale filing-derived diluted weighted-average
+    shares are not automatically preferred when current Yahoo/implied shares are
+    consistent with market cap. The app compares all candidates and warns when
     they materially disagree.
   - Share-count differences above 10% show a warning; differences above 25% or
     candidates that differ by about 2x are marked as valuation data-quality risk.
@@ -120,6 +124,9 @@ not optimized to do.
     derived estimates, and fallback estimates. Each major input shows value,
     source, formula, period/as-of date, retrieval timestamp, confidence, and
     freshness label.
+  - Common ticker-to-CIK values are cached in code for frequently tested U.S.
+    tickers so SEC Companyfacts can still be queried when Streamlit Cloud is
+    blocked from `company_tickers.json`.
   - Data freshness labels are: Fresh (0-45 days), Recent (46-120 days), Stale
     (121-365 days), Very stale (over 365 days), and Unknown.
   - Single-stock mode shows a compact Data Timing & Freshness summary and warns

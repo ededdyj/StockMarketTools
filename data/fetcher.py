@@ -35,10 +35,12 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
             history = stock.history(**timeframe)
 
         financials = _safe_statement_frame(stock, "financials")
+        quarterly_financials = _safe_statement_frame(stock, "quarterly_financials")
         cashflow = _safe_statement_frame(stock, "cashflow")  # Typically annual periods as columns
         quarterly_cashflow = _safe_statement_frame(stock, "quarterly_cashflow")
         ttm_cashflow = _safe_statement_frame(stock, "ttm_cashflow")
         balance_sheet = _safe_statement_frame(stock, "balance_sheet")
+        quarterly_balance_sheet = _safe_statement_frame(stock, "quarterly_balance_sheet")
         sec_fcf_snapshot, sec_fcf_warnings = get_sec_free_cash_flow_snapshot(ticker)
         (
             financials,
@@ -51,12 +53,14 @@ def get_stock_data(ticker: str, timeframe: dict = None) -> dict:
             "info": info,
             "history": history,
             "financials": financials,
+            "quarterly_financials": quarterly_financials,
             "cashflow": cashflow,
             "quarterly_cashflow": quarterly_cashflow,
             "ttm_cashflow": ttm_cashflow,
             "sec_fcf_snapshot": sec_fcf_snapshot,
             "sec_fcf_warnings": sec_fcf_warnings,
             "balance_sheet": balance_sheet,
+            "quarterly_balance_sheet": quarterly_balance_sheet,
             "financial_health_source": financial_health_source,
             "sec_warnings": sec_warnings,
         }

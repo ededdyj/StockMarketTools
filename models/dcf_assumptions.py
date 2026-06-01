@@ -8,6 +8,7 @@ from typing import Optional
 import pandas as pd
 
 from data.market_inputs import MarketInputs
+from models.free_cash_flow import calculate_free_cash_flow
 from models.valuation import DcfAssumptions
 
 
@@ -74,6 +75,17 @@ def _series(frame: Optional[pd.DataFrame], labels: list[str]) -> list[float]:
     return []
 
 
+def _fcf_series_from_cashflow(frame: Optional[pd.DataFrame]) -> list[float]:
+    operating = _series(frame, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+    capex = _series(frame, ["Capital Expenditure", "Capital Expenditures", "Capital Expenditure Reported"])
+    if operating and capex:
+        return [
+            calculate_free_cash_flow(ocf, capex_value)
+            for ocf, capex_value in zip(operating, capex)
+        ]
+    return _series(frame, ["Free Cash Flow"])
+
+
 def _median_growth(values: list[float]) -> Optional[float]:
     if len(values) < 2:
         return None
@@ -93,6 +105,7 @@ def estimate_dynamic_dcf_assumptions(
     balance_sheet: Optional[pd.DataFrame],
     cashflow: Optional[pd.DataFrame],
     market_inputs: MarketInputs,
+    quarterly_cashflow: Optional[pd.DataFrame] = None,
 ) -> DynamicDcfEstimate:
     warnings = [*market_inputs.warnings]
     lines: list[AssumptionLine] = []
@@ -138,12 +151,16 @@ def estimate_dynamic_dcf_assumptions(
     discount_rate = equity_weight * cost_of_equity + debt_weight * after_tax_cost_of_debt
     discount_rate = _clamp(discount_rate, 0.06, 0.16)
 
-    fcf_growth = _median_growth(_series(cashflow, ["Free Cash Flow"]))
+    fcf_growth = _median_growth(_fcf_series_from_cashflow(cashflow))
+    fcf_growth_source = "annual FCF growth"
+    if fcf_growth is None:
+        fcf_growth = _median_growth(_fcf_series_from_cashflow(quarterly_cashflow))
+        fcf_growth_source = "quarterly FCF growth"
     revenue_growth = _median_growth(_series(financials, ["Total Revenue", "Operating Revenue"]))
     growth_candidates = [value for value in [fcf_growth, revenue_growth] if value is not None]
     if growth_candidates:
         growth_rate = sum(growth_candidates) / len(growth_candidates)
-        growth_source = "Average of usable recent FCF and revenue growth"
+        growth_source = f"Average of usable recent {fcf_growth_source if fcf_growth is not None else 'FCF'} and revenue growth"
     else:
         growth_rate = 0.03
         growth_source = "Fallback mature-company growth"

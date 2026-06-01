@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
@@ -11,6 +12,7 @@ import pandas as pd
 MISMATCH_WARNING_THRESHOLD = 0.10
 MISMATCH_RISK_THRESHOLD = 0.25
 DOUBLE_HALVE_THRESHOLD = 2.0
+STALE_FILING_SHARE_DAYS = 120
 
 YFINANCE_SHARE_FIELDS = [
     ("sharesOutstanding", "Yahoo Finance sharesOutstanding"),
@@ -102,6 +104,17 @@ def _candidate_priority(candidate: ShareCountCandidate) -> int:
         "computed_market_cap": 4,
     }
     return order.get(candidate.kind, 9)
+
+
+def _age_days(value: Optional[str]) -> Optional[int]:
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    now = pd.Timestamp(datetime.now(timezone.utc)).tz_localize(None)
+    parsed = pd.Timestamp(parsed)
+    if parsed.tzinfo:
+        parsed = parsed.tz_localize(None)
+    return max((now - parsed).days, 0)
 
 
 def resolve_share_count(
@@ -201,6 +214,9 @@ def resolve_share_count(
         base = _candidate_priority(candidate)
         implied_diff = _pct_diff(candidate.value, implied_shares)
         penalty = 0.0
+        age = _age_days(candidate.date_or_period)
+        if candidate.kind == "filing_diluted" and age is not None and age > STALE_FILING_SHARE_DAYS:
+            penalty += 4.0
         if implied_diff is not None:
             if implied_diff > MISMATCH_RISK_THRESHOLD:
                 penalty += 10.0
@@ -227,6 +243,13 @@ def resolve_share_count(
             "Using market-cap-implied shares because direct share-count fields were missing or materially inconsistent."
         )
         data_quality_risk = True
+
+    for candidate in candidates:
+        age = _age_days(candidate.date_or_period)
+        if candidate.kind == "filing_diluted" and age is not None and age > STALE_FILING_SHARE_DAYS:
+            warnings.append(
+                f"{candidate.source} is {age} days old; current Yahoo or market-cap-implied share counts may better reflect recent buybacks or dilution."
+            )
 
     deduped_warnings = list(dict.fromkeys(warnings))
     return ShareCountResolution(

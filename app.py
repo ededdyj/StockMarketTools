@@ -106,6 +106,17 @@ def _data_is_complete(data: Dict) -> bool:
     return bool(info) or (history is not None and not history.empty)
 
 
+def prefer_current_statement_frame(
+    annual_frame: pd.DataFrame,
+    quarterly_frame: pd.DataFrame,
+) -> pd.DataFrame:
+    """Prefer quarterly statement data when yfinance provides it."""
+
+    if isinstance(quarterly_frame, pd.DataFrame) and not quarterly_frame.empty:
+        return quarterly_frame
+    return annual_frame
+
+
 def _set_dcf_session_state(assumptions: DcfAssumptions) -> None:
     st.session_state["dcf_discount_rate_pct"] = assumptions.discount_rate * 100
     st.session_state["dcf_growth_rate_pct"] = assumptions.growth_rate * 100
@@ -1265,23 +1276,28 @@ def single_stock_analysis(philosophy, mode_description: str):
     info = data.get("info", {})
     history = data.get("history", pd.DataFrame())
     financials = data.get("financials", pd.DataFrame())
+    quarterly_financials = data.get("quarterly_financials", pd.DataFrame())
     cashflow = data.get("cashflow", pd.DataFrame())
     quarterly_cashflow = data.get("quarterly_cashflow", pd.DataFrame())
     ttm_cashflow = data.get("ttm_cashflow", pd.DataFrame())
     sec_fcf_snapshot = data.get("sec_fcf_snapshot")
     balance_sheet = data.get("balance_sheet")
+    quarterly_balance_sheet = data.get("quarterly_balance_sheet", pd.DataFrame())
+    valuation_financials = prefer_current_statement_frame(financials, quarterly_financials)
+    valuation_balance_sheet = prefer_current_statement_frame(balance_sheet, quarterly_balance_sheet)
     financial_health_source = data.get("financial_health_source", "Yahoo Finance")
     sec_warnings = data.get("sec_warnings", [])
 
-    fundamentals = extract_fundamentals(info, balance_sheet, financials=financials)
+    fundamentals = extract_fundamentals(info, valuation_balance_sheet, financials=valuation_financials)
     financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
     market_inputs = get_market_inputs()
     dynamic_dcf = estimate_dynamic_dcf_assumptions(
         info,
-        financials,
-        balance_sheet,
+        valuation_financials,
+        valuation_balance_sheet,
         cashflow,
         market_inputs,
+        quarterly_cashflow=quarterly_cashflow,
     )
     user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions(
         dynamic_dcf.assumptions,
@@ -1362,7 +1378,7 @@ def single_stock_analysis(philosophy, mode_description: str):
             user_assumptions,
             fcf_snapshot,
             dynamic_estimate=dynamic_dcf,
-            financials=financials,
+            financials=valuation_financials,
             cashflow=cashflow,
             sec_warnings=sec_warnings,
             philosophy_name=philosophy.name,
@@ -1373,7 +1389,7 @@ def single_stock_analysis(philosophy, mode_description: str):
             fcf_snapshot,
             dynamic_dcf,
             market_inputs,
-            financials=financials,
+            financials=valuation_financials,
         )
         dcf_fit = calculate_dcf_fit(info, fundamentals, fcf_snapshot, dcf_warnings)
         render_data_freshness_summary(provenance_report)

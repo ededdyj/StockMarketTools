@@ -18,6 +18,18 @@ SEC_BASE_URL = "https://data.sec.gov"
 SEC_TICKER_URL = "https://www.sec.gov/files/company_tickers.json"
 DEFAULT_SEC_USER_AGENT = "StockMarketTools ededdyj@users.noreply.github.com"
 SEC_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+STATIC_TICKER_CIKS = {
+    "AAPL": "0000320193",
+    "AMAT": "0000006951",
+    "AMZN": "0001018724",
+    "DELL": "0001571996",
+    "GOOG": "0001652044",
+    "GOOGL": "0001652044",
+    "META": "0001326801",
+    "MSFT": "0000789019",
+    "NVDA": "0001045810",
+    "TSLA": "0001318605",
+}
 
 
 @dataclass(frozen=True)
@@ -99,7 +111,10 @@ def _ticker_to_cik_map() -> dict[str, str]:
 
 
 def ticker_to_cik(ticker: str) -> Optional[str]:
-    return _ticker_to_cik_map().get(ticker.upper().replace(".", "-"))
+    normalized = ticker.upper().replace(".", "-")
+    if normalized in STATIC_TICKER_CIKS:
+        return STATIC_TICKER_CIKS[normalized]
+    return _ticker_to_cik_map().get(normalized)
 
 
 def _units_for_fact(fact: dict, preferred_units: tuple[str, ...]) -> list[dict]:

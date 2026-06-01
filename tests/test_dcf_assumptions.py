@@ -68,3 +68,27 @@ def test_estimate_dynamic_dcf_assumptions_falls_back_when_inputs_missing():
     assert estimate.assumptions.projection_years == 5
     assert estimate.warnings
     assert any(line.assumption == "Beta" and "Fallback" in line.source for line in estimate.lines)
+
+
+def test_estimate_dynamic_dcf_assumptions_can_use_quarterly_fcf_growth_when_annual_fcf_missing():
+    quarterly_cashflow = pd.DataFrame(
+        {
+            "2026-09-30": [130.0, -20.0],
+            "2026-06-30": [120.0, -20.0],
+            "2026-03-31": [110.0, -20.0],
+            "2025-12-31": [100.0, -20.0],
+        },
+        index=["Operating Cash Flow", "Capital Expenditure"],
+    )
+
+    estimate = estimate_dynamic_dcf_assumptions(
+        {"beta": 1.0, "marketCap": 1_000.0},
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        _market_inputs(),
+        quarterly_cashflow=quarterly_cashflow,
+    )
+
+    assert estimate.assumptions.growth_rate > 0
+    assert any("quarterly FCF growth" in line.source for line in estimate.lines if line.assumption == "Growth rate")

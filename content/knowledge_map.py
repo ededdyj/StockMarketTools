@@ -333,6 +333,7 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         calculations=[
             "Implied shares = market cap / current price",
             "Selected-vs-implied difference = abs(selected - implied) / implied",
+            "Stale filing-derived diluted weighted-average shares receive a priority penalty when current Yahoo/implied shares are consistent",
             "Warn above 10%, mark risk above 25%, and strongly warn when plausible candidates differ by 2x",
         ],
         transparency_surfaces=[
@@ -343,6 +344,7 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         limitations=[
             "Market-cap-implied shares depend on Yahoo market cap and price quality.",
             "Filing share counts can lag buybacks, issuance, and class conversions.",
+            "Diluted weighted-average shares are not the same thing as period-end common shares.",
         ],
         sources=[
             KnowledgeSource(
@@ -565,6 +567,8 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         why_it_matters="A current share price can be mixed with older annual or quarterly financial statements; valuation users need to see that timing mismatch.",
         inputs=[
             "Market snapshot fields such as price, market cap, beta, and Yahoo profile metrics",
+            "Quarterly statement periods preferred for cash, debt, revenue, net income, operating cash flow, capex, and FCF when available",
+            "Annual statement periods used as fallbacks when quarterly or TTM data is missing",
             "Official or filing-derived statement periods for shares, cash, debt, revenue, net income, operating cash flow, capex, and FCF",
             "FRED and Damodaran market input source strings for risk-free rate and equity risk premium",
         ],
@@ -580,6 +584,7 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
         limitations=[
             "Yahoo profile fields may not expose precise timestamps for every metric.",
+            "Quarterly yfinance statement frames may be unavailable or incomplete for some tickers.",
             "A freshness label does not prove the data is correct; it only describes timing and source clarity.",
         ],
         sources=[
