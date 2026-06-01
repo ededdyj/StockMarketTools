@@ -12,6 +12,7 @@ import pandas as pd
 from data.market_inputs import MarketInputs
 from models.dcf_assumptions import DynamicDcfEstimate
 from models.free_cash_flow import FreeCashFlowSnapshot
+from models.income_metrics import IncomeMetricsSnapshot
 from utils.fundamentals import FundamentalsSnapshot
 
 
@@ -135,6 +136,7 @@ def build_valuation_input_provenance(
     dynamic_estimate: Optional[DynamicDcfEstimate],
     market_inputs: MarketInputs,
     financials: Optional[pd.DataFrame] = None,
+    income_metrics: Optional[IncomeMetricsSnapshot] = None,
 ) -> DataFreshnessReport:
     run_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     income_period = _latest_statement_period(financials)
@@ -158,9 +160,9 @@ def build_valuation_input_provenance(
         _make_input("Operating Cash Flow", fcf_snapshot.operating_cash_flow, fcf_snapshot.source, "Cash flow statement operating cash flow", fcf_snapshot.period, pulled_at, fcf_snapshot.confidence_level if fcf_snapshot.operating_cash_flow is not None else "Low", "Official filing data" if "SEC" in fcf_snapshot.source else "Market snapshot" if fcf_snapshot.operating_cash_flow is not None else "Fallback estimate"),
         _make_input("Capital Expenditures", fcf_snapshot.capital_expenditures, fcf_snapshot.source, "Capex treated as cash outflow", fcf_snapshot.period, pulled_at, fcf_snapshot.confidence_level if fcf_snapshot.capital_expenditures is not None else "Low", "Official filing data" if "SEC" in fcf_snapshot.source else "Market snapshot" if fcf_snapshot.capital_expenditures is not None else "Fallback estimate"),
         _make_input("Free Cash Flow", fcf_snapshot.value, fcf_snapshot.source, fcf_snapshot.formula, fcf_snapshot.period, pulled_at, fcf_snapshot.confidence_level if fcf_snapshot.value is not None else "Low", "Official filing data" if "SEC" in fcf_snapshot.source else "Derived estimate" if fcf_snapshot.value is not None else "Fallback estimate"),
-        _make_input("Revenue", info.get("totalRevenue"), "Yahoo Finance profile", "totalRevenue", income_period, pulled_at, "Medium", "Market snapshot"),
-        _make_input("Net Income", info.get("netIncomeToCommon"), "Yahoo Finance profile", "netIncomeToCommon", income_period, pulled_at, "Medium", "Market snapshot"),
-        _make_input("EPS", info.get("trailingEps"), "Yahoo Finance profile", "trailingEps", income_period, pulled_at, "Medium", "Market snapshot"),
+        _make_input("Revenue", income_metrics.revenue if income_metrics else info.get("totalRevenue"), income_metrics.source if income_metrics else "Yahoo Finance profile", "TTM quarterly revenue, annual revenue, or totalRevenue fallback", income_metrics.period if income_metrics else income_period, pulled_at, income_metrics.confidence_level if income_metrics else "Medium", "Derived estimate" if income_metrics and income_metrics.method == "ttm_quarterly" else "Market snapshot"),
+        _make_input("Net Income", income_metrics.net_income if income_metrics else info.get("netIncomeToCommon"), income_metrics.source if income_metrics else "Yahoo Finance profile", "TTM quarterly net income, annual net income, or netIncomeToCommon fallback", income_metrics.period if income_metrics else income_period, pulled_at, income_metrics.confidence_level if income_metrics else "Medium", "Derived estimate" if income_metrics and income_metrics.method == "ttm_quarterly" else "Market snapshot"),
+        _make_input("EPS", income_metrics.eps if income_metrics else info.get("trailingEps"), income_metrics.source if income_metrics else "Yahoo Finance profile", "TTM net income / shares used, reported EPS, or trailingEps fallback", income_metrics.period if income_metrics else income_period, pulled_at, income_metrics.confidence_level if income_metrics else "Medium", "Derived estimate" if income_metrics and income_metrics.method == "ttm_quarterly" else "Market snapshot"),
         _make_input("Beta", info.get("beta"), "Yahoo Finance profile", "beta", price_period, pulled_at, "Medium", "Market snapshot"),
         _make_input("Risk-free Rate", market_inputs.risk_free_rate, market_inputs.risk_free_source, "Latest long-term US Treasury proxy", _market_input_date(market_inputs.risk_free_source), pulled_at, "Medium", "Market snapshot"),
         _make_input("Equity Risk Premium", market_inputs.equity_risk_premium, market_inputs.equity_risk_premium_source, "Market-implied or fallback mature-market ERP", _market_input_date(market_inputs.equity_risk_premium_source), pulled_at, "Medium", "Market snapshot"),

@@ -12,9 +12,14 @@ from models.share_count import ShareCountResolution, resolve_share_count
 
 
 BALANCE_SHEET_CASH_FIELDS = [
+    "Cash Cash Equivalents And Short Term Investments",
     "Cash And Cash Equivalents",
+    "Cash Cash Equivalents And Federal Funds Sold",
     "Cash",
     "CashAndCashEquivalents",
+    "Cash Equivalents",
+    "Cash Financial",
+    "Other Short Term Investments",
 ]
 
 BALANCE_SHEET_TOTAL_DEBT_FIELDS = [
@@ -29,10 +34,18 @@ SHORT_TERM_DEBT_FIELDS = [
     "Short Long Term Debt",
     "Short Term Debt",
     "Current Debt",
+    "Current Debt And Capital Lease Obligation",
+    "Current Debt And Finance Lease Obligation",
+    "Long Term Debt And Finance Lease Obligation Current",
+    "Long Term Debt And Capital Lease Obligation Current",
+    "Commercial Paper",
 ]
 
 LONG_TERM_DEBT_FIELDS = [
     "Long Term Debt",
+    "Long Term Debt And Capital Lease Obligation",
+    "Long Term Debt And Finance Lease Obligation",
+    "Long Term Debt Noncurrent",
 ]
 
 

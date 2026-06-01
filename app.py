@@ -15,6 +15,7 @@ from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assu
 from models.dcf_warnings import DcfWarning, generate_dcf_warnings
 from models.dividend_yield import resolve_dividend_yield
 from models.free_cash_flow import FreeCashFlowSnapshot, resolve_free_cash_flow
+from models.income_metrics import resolve_income_metrics
 from models.provenance import DataFreshnessReport, build_valuation_input_provenance
 from models.valuation import (
     DcfAssumptions,
@@ -1319,6 +1320,12 @@ def single_stock_analysis(philosophy, mode_description: str):
     sec_warnings = data.get("sec_warnings", [])
 
     fundamentals = extract_fundamentals(info, valuation_balance_sheet, financials=valuation_financials)
+    income_metrics = resolve_income_metrics(
+        info,
+        annual_financials=financials,
+        quarterly_financials=quarterly_financials,
+        shares_outstanding=fundamentals.shares_outstanding,
+    )
     financial_health = calculate_financial_health(financials, balance_sheet, cashflow)
     market_inputs = get_market_inputs()
     dynamic_dcf = estimate_dynamic_dcf_assumptions_safe(
@@ -1420,6 +1427,7 @@ def single_stock_analysis(philosophy, mode_description: str):
             dynamic_dcf,
             market_inputs,
             financials=valuation_financials,
+            income_metrics=income_metrics,
         )
         dcf_fit = calculate_dcf_fit(info, fundamentals, fcf_snapshot, dcf_warnings)
         render_data_freshness_summary(provenance_report)

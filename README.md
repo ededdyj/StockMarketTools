@@ -99,6 +99,9 @@ not optimized to do.
     available, then fall back to annual balance-sheet data, and finally to zero
     with a warning if Yahoo Finance omits them. The “Assumptions & Data”
     expander shows which fields were used and the balance-sheet “as-of” date.
+  - Revenue, net income, and EPS provenance now prefers TTM values derived from
+    the latest four yfinance quarterly income-statement periods, then annual
+    financials, then Yahoo profile fields.
   - Shares are resolved from filing-derived diluted/common share counts,
     `sharesOutstanding`, `impliedSharesOutstanding`, and
     `marketCap / currentPrice`. Stale filing-derived diluted weighted-average

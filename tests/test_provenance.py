@@ -3,6 +3,7 @@ import pandas as pd
 from data.market_inputs import MarketInputs
 from models.dcf_assumptions import AssumptionLine, DynamicDcfEstimate
 from models.free_cash_flow import FreeCashFlowSnapshot
+from models.income_metrics import IncomeMetricsSnapshot
 from models.provenance import (
     age_in_days,
     build_valuation_input_provenance,
@@ -66,11 +67,23 @@ def test_build_valuation_input_provenance_includes_categories_and_stale_warning(
         dynamic,
         MarketInputs(0.045, 0.05, "FRED DGS10 10Y Treasury (2026-05-30)", "Damodaran historical implied ERP table (2026)", []),
         financials=pd.DataFrame({"2025-01-31": [500]}, index=["Total Revenue"]),
+        income_metrics=IncomeMetricsSnapshot(
+            revenue=600,
+            net_income=120,
+            eps=1.2,
+            source="yfinance quarterly financials TTM",
+            period="TTM through 2026-03-31",
+            method="ttm_quarterly",
+            confidence_level="Medium",
+        ),
     )
 
     names = {row.name for row in report.rows}
     assert "Current Price" in names
     assert "Free Cash Flow" in names
     assert "Risk-free Rate" in names
+    revenue = next(row for row in report.rows if row.name == "Revenue")
+    assert revenue.value == 600
+    assert revenue.period_or_as_of == "TTM through 2026-03-31"
     assert any(row.category == "Official filing data" for row in report.rows)
     assert any("more than 120 days old" in warning for warning in report.warnings)

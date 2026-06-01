@@ -568,6 +568,7 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         inputs=[
             "Market snapshot fields such as price, market cap, beta, and Yahoo profile metrics",
             "Quarterly statement periods preferred for cash, debt, revenue, net income, operating cash flow, capex, and FCF when available",
+            "TTM income metrics derived from the latest four quarterly revenue and net-income periods where possible",
             "Annual statement periods used as fallbacks when quarterly or TTM data is missing",
             "Official or filing-derived statement periods for shares, cash, debt, revenue, net income, operating cash flow, capex, and FCF",
             "FRED and Damodaran market input source strings for risk-free rate and equity risk premium",
@@ -575,6 +576,7 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         calculations=[
             "Age in days = current app run date - parsed period/as-of date",
             "Freshness labels: Fresh 0-45 days, Recent 46-120 days, Stale 121-365 days, Very stale over 365 days, Unknown when date is unavailable",
+            "TTM revenue/net income = sum of latest four quarterly income-statement values; EPS = TTM net income / shares used when reported EPS is unavailable",
             "Warnings when current market data is mixed with cash-flow data older than 120 days or statement dates cannot be parsed",
         ],
         transparency_surfaces=[

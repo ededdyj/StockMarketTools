@@ -104,3 +104,23 @@ def test_extract_fundamentals_uses_net_debt_without_subtracting_cash_twice():
     assert snapshot.total_debt == 100.0
     assert snapshot.net_debt == 75.0
     assert snapshot.debt_source == "Net Debt"
+
+
+def test_extract_fundamentals_handles_yfinance_cash_and_debt_variants():
+    balance_sheet = pd.DataFrame(
+        {
+            "2026-03-31": [80.0, 15.0, 45.0],
+        },
+        index=[
+            "Cash Cash Equivalents And Short Term Investments",
+            "Current Debt And Capital Lease Obligation",
+            "Long Term Debt And Capital Lease Obligation",
+        ],
+    )
+
+    snapshot = extract_fundamentals({"sharesOutstanding": 1_000_000}, balance_sheet)
+
+    assert snapshot.cash_and_equivalents == 80.0
+    assert snapshot.total_debt == 60.0
+    assert snapshot.net_debt == -20.0
+    assert snapshot.balance_sheet_as_of == "2026-03-31"
