@@ -32,6 +32,14 @@ from models.financial_health import calculate_financial_health, FinancialHealthR
 from utils.charts import plot_price_history, plot_cashflow
 from analysis.sp500_deals import analyze_sp500_deals
 from analysis.quality_value_screener import analyze_quality_value_screener
+from analysis.single_stock_comparison import (
+    DEFAULT_COMPARISON_WEIGHTS,
+    DEFAULT_MAX_COMPARISON_TICKERS,
+    ComparisonResult,
+    build_single_stock_comparison_prompt,
+    compare_single_stocks,
+    parse_ticker_input,
+)
 from config.philosophies import get_philosophy_options, get_philosophy
 from utils.logger import get_logger, read_recent_logs
 from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
@@ -48,6 +56,7 @@ logger = get_logger(__name__)
 
 MODE_DESCRIPTIONS: Dict[str, str] = {
     "Single Stock Analysis": "Deep dive on one ticker with metrics, cash flow, and valuation.",
+    "Single Stock Comparison": "Compare a custom ticker list and rank best model-based value today.",
     "SP500 Deals": "Run a batch DCF to surface S&P 500 names trading below intrinsic value.",
     "Quality vs Value Screener": "Rank a universe by composite quality, growth, stability, and value scores.",
     "Knowledge Map": "Learn the assumptions, formulas, data sources, and limitations behind the app.",
@@ -1631,6 +1640,154 @@ affect valuation quality.
         st.write("No data available from the Quality vs. Value Screener.")
 
 
+def render_single_stock_comparison(philosophy_name: str, mode_description: str):
+    st.subheader("Single Stock Comparison")
+    st.caption(mode_description)
+    user_assumptions, assumptions_valid, assumption_error = get_user_dcf_assumptions()
+    if not assumptions_valid:
+        st.error(f"DCF assumptions invalid: {assumption_error}")
+        return
+
+    st.markdown(
+        """
+Compare manually entered individual stock tickers and rank them as **Best Value Today According to App Data**.
+The output is a model-based research triage list, not guaranteed investment advice.
+"""
+    )
+    raw_tickers = st.text_area(
+        "Tickers to compare",
+        value="AAPL MSFT GOOGL AMZN META",
+        height=110,
+        help="Enter tickers separated by commas, spaces, or new lines. Example: AAPL MSFT GOOGL AMZN META",
+    )
+    max_tickers = int(
+        st.number_input(
+            "Max tickers this run",
+            min_value=2,
+            max_value=50,
+            value=DEFAULT_MAX_COMPARISON_TICKERS,
+            step=1,
+            help="The default cap reduces yfinance throttling risk. Extra parsed tickers beyond the cap are ignored.",
+        )
+    )
+    tickers = parse_ticker_input(raw_tickers, max_tickers=max_tickers)
+    all_parsed = parse_ticker_input(raw_tickers, max_tickers=10_000)
+    if len(all_parsed) > len(tickers):
+        st.warning(f"Parsed {len(all_parsed)} unique tickers; only the first {len(tickers)} will run due to the max ticker limit.")
+    st.caption(f"Parsed tickers: {', '.join(tickers) if tickers else 'None'}")
+
+    with st.expander("Scoring Formula and Limitations", expanded=False):
+        st.markdown(
+            f"""
+Ranking is a weighted composite calculated within the entered ticker set:
+
+- **Value / upside to app fair value ({DEFAULT_COMPARISON_WEIGHTS['Value']:.0%})**
+- **Financial health score ({DEFAULT_COMPARISON_WEIGHTS['Financial Health']:.0%})**
+- **Quality metrics such as ROE and profitability ({DEFAULT_COMPARISON_WEIGHTS['Quality']:.0%})**
+- **Growth metrics such as revenue growth ({DEFAULT_COMPARISON_WEIGHTS['Growth']:.0%})**
+- **Stability / leverage risk ({DEFAULT_COMPARISON_WEIGHTS['Stability']:.0%})**
+
+The model subtracts penalties for high/medium DCF warnings, missing current price,
+and missing fair value. A stock with missing fair value should not rank first.
+Percentile-style component scores are only relative to the tickers entered here.
+"""
+        )
+
+    if len(tickers) < 2:
+        st.info("Enter at least 2 tickers to run a comparison.")
+        return
+
+    if not st.button("Run Comparison"):
+        return
+
+    progress = st.progress(0)
+    total = len(tickers)
+
+    def data_loader(ticker: str) -> Dict:
+        index = tickers.index(ticker)
+        progress.progress(index / total, text=f"Fetching and valuing {ticker}...")
+        data, _ = load_stock_bundle(ticker, "1 Year")
+        progress.progress((index + 1) / total, text=f"Completed {ticker}")
+        return data
+
+    with st.spinner("Comparing entered tickers..."):
+        result: ComparisonResult = compare_single_stocks(
+            tickers,
+            assumptions=user_assumptions,
+            data_loader=data_loader,
+            philosophy_name=philosophy_name,
+        )
+    progress.empty()
+
+    if result.skipped:
+        with st.expander(f"Skipped / failed tickers ({len(result.skipped)})", expanded=True):
+            st.dataframe(pd.DataFrame([skip.__dict__ for skip in result.skipped]), use_container_width=True)
+
+    comparison_df = result.dataframe
+    if comparison_df.empty:
+        st.warning("No ranked comparison rows were produced.")
+        return
+
+    st.subheader("Best Value Today According to App Data")
+    winner = comparison_df.iloc[0]
+    st.success(
+        f"#{int(winner['Rank'])}: {winner['Ticker']} is the top model-based value in this entered set "
+        f"with an overall comparison score of {winner['Overall Comparison Score']:.2f}."
+    )
+    display_columns = [
+        "Rank",
+        "Ticker",
+        "Company",
+        "Current Price",
+        "App Fair Value",
+        "Upside/Downside %",
+        "Value Score",
+        "Financial Health Score",
+        "Quality Score",
+        "Growth Score",
+        "Stability Score",
+        "Warning Penalty",
+        "Overall Comparison Score",
+        "Model Verdict",
+        "Key Reason",
+        "Missing Data / Warnings",
+    ]
+    st.dataframe(
+        comparison_df[display_columns],
+        use_container_width=True,
+        column_config={
+            "Current Price": st.column_config.NumberColumn(format="$%.2f"),
+            "App Fair Value": st.column_config.NumberColumn(format="$%.2f"),
+            "Upside/Downside %": st.column_config.NumberColumn(format="%.1%"),
+            "Value Score": st.column_config.NumberColumn(format="%.2f"),
+            "Financial Health Score": st.column_config.NumberColumn(format="%.2f"),
+            "Quality Score": st.column_config.NumberColumn(format="%.2f"),
+            "Growth Score": st.column_config.NumberColumn(format="%.2f"),
+            "Stability Score": st.column_config.NumberColumn(format="%.2f"),
+            "Warning Penalty": st.column_config.NumberColumn(format="%.2f"),
+            "Overall Comparison Score": st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
+
+    with st.expander("Detailed comparison data", expanded=False):
+        st.dataframe(comparison_df, use_container_width=True)
+
+    prompt = build_single_stock_comparison_prompt(result, tickers)
+    st.subheader("ChatGPT Comparison Validation Prompt")
+    st.text_area(
+        "Copyable prompt",
+        value=prompt,
+        height=420,
+        help="Paste this into ChatGPT to validate the app ranking with current external research.",
+    )
+    st.download_button(
+        "Download comparison prompt",
+        data=prompt,
+        file_name="single_stock_comparison_prompt.md",
+        mime="text/markdown",
+    )
+
+
 ##############################
 # Sidebar Controls
 ##############################
@@ -1651,6 +1808,8 @@ render_philosophy_summary(philosophy)
 
 if mode == "Single Stock Analysis":
     single_stock_analysis(philosophy, MODE_DESCRIPTIONS[mode])
+elif mode == "Single Stock Comparison":
+    render_single_stock_comparison(philosophy.name, MODE_DESCRIPTIONS[mode])
 elif mode == "SP500 Deals":
     render_sp500_deals(philosophy.name, MODE_DESCRIPTIONS[mode])
 elif mode == "Quality vs Value Screener":

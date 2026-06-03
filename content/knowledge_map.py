@@ -231,6 +231,55 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
     ),
     KnowledgeNode(
+        title="Single Stock Comparison",
+        category="Screening",
+        summary=(
+            "Ranks a user-entered list of individual tickers from best model-based value today "
+            "to worst using the app's DCF, financial-health, quality, growth, and stability data."
+        ),
+        why_it_matters=(
+            "A custom comparison is useful when the question is not 'what is best in a whole index?' "
+            "but 'which of these specific stocks deserves research first?'"
+        ),
+        inputs=[
+            "Comma-, space-, or newline-separated user-entered tickers",
+            "Yahoo Finance profile, price, cash-flow, balance-sheet, and income-statement fields",
+            "SEC EDGAR fallback statement data where available",
+            "Active sidebar DCF assumptions",
+            "DCF data-quality warnings and financial health score",
+        ],
+        calculations=[
+            "Normalize and deduplicate tickers, capped by the max ticker setting",
+            "Value Score = normalized app DCF upside/downside to fair value",
+            "Financial Health Score = Piotroski-style score normalized to 0-1",
+            "Quality Score = relative ROE and profit-margin strength within the entered ticker set",
+            "Growth Score = relative revenue-growth strength within the entered ticker set",
+            "Stability Score = inverse relative debt-to-equity risk within the entered ticker set",
+            "Overall Comparison Score = Value 45% + Financial Health 20% + Quality 15% + Growth 10% + Stability 10% - warning/missing-data penalties",
+        ],
+        transparency_surfaces=[
+            "Single Stock Comparison ranked dataframe",
+            "Scoring Formula and Limitations expander",
+            "Skipped / failed ticker table",
+            "Detailed comparison data expander",
+            "ChatGPT Comparison Validation Prompt",
+        ],
+        limitations=[
+            "The rank is model-based and not investment advice or a guaranteed buy recommendation.",
+            "Scores are relative to only the tickers entered by the user.",
+            "A missing fair value is penalized, but partial rows can still appear for transparency.",
+            "Yahoo Finance can throttle requests or omit fields, so skipped ticker reasons must be reviewed.",
+            "The ChatGPT prompt is for external validation; the app does not call ChatGPT or paid APIs.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "SEC EDGAR Company Filings",
+                "https://www.sec.gov/edgar/search/",
+                "Primary source to validate filings and newer information surfaced by the comparison prompt.",
+            )
+        ],
+    ),
+    KnowledgeNode(
         title="Dividend Income Estimate",
         category="Income",
         summary=(

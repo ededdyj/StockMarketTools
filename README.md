@@ -5,6 +5,9 @@ multiple investment philosophies. The app centralizes:
 
 - **Single-stock deep dives** with profile data, dividend safety, FCF charts, and
   DCF fair value ranges.
+- **Single Stock Comparison** for ranking a custom list of individual tickers
+  from best model-based value today to worst using app valuation and quality
+  signals.
 - **ChatGPT research prompt exports** that package the single-stock analysis
   output into a copyable prompt for deeper external research and fair-value
   review.
@@ -25,7 +28,7 @@ different defaults, metrics, and warnings so the UI reflects the targeted playbo
 
 | Philosophy | Highlights | Recommended Tools |
 | --- | --- | --- |
-| **Long-term Value/DCF** | Intrinsic value via discounted cash flow, focus on steady FCF and discount-to-fair-value metrics. | Single Stock Analysis, SP500 Deals |
+| **Long-term Value/DCF** | Intrinsic value via discounted cash flow, focus on steady FCF and discount-to-fair-value metrics. | Single Stock Analysis, Single Stock Comparison, SP500 Deals |
 | **Dividend/Income** | Dividend rate, forward yield, payout ratio, and annual income projections for cash-flow stability. | Single Stock Analysis, Quality vs Value Screener |
 | **Growth-at-a-Reasonable-Price** | Percentile-based ROE and revenue growth with DCF discounts for growth names still priced reasonably. | Quality vs Value Screener |
 | **Momentum/Trend** | Multi-horizon price changes, beta, and trend-centric charts to follow strength/weakness. | Single Stock Analysis |
@@ -162,6 +165,33 @@ not optimized to do.
     `Financial Health` 15% by default).
   - Boolean columns signal whether a name meets the philosophy’s ROE and revenue
     growth thresholds.
+
+- **Single Stock Comparison**
+  - The tool accepts tickers separated by commas, spaces, or new lines, then
+    uppercases, deduplicates, and caps the list at a user-set maximum
+    (`20` by default) to reduce yfinance throttling risk.
+  - It reuses the same DCF valuation, free-cash-flow resolver, net-debt/share
+    resolver, DCF warnings, DCF fit label, SEC statement fallback, and
+    Piotroski-style financial health score used by the single-stock dashboard.
+  - Ranking label: **Best Value Today According to App Data**. This is a
+    model-based triage rank, not investment advice or a guaranteed buy
+    recommendation.
+  - Overall comparison score uses:
+    `Value/upside 45% + Financial Health 20% + Quality 15% + Growth 10% + Stability 10% - warning/missing-data penalties`.
+  - Value/upside is based on the app DCF fair value versus current price.
+    Financial health is the normalized 0-9 health score. Quality uses relative
+    ROE and profit margin. Growth uses relative revenue growth. Stability
+    rewards lower debt-to-equity within the entered ticker set.
+  - Missing fair value, missing price, and high/medium DCF data-quality warnings
+    reduce the score so incomplete data cannot silently rank as the top idea.
+  - The ranked table shows the component scores, warning penalty, model verdict,
+    key reason, and missing-data/warning notes. Skipped or failed tickers are
+    shown with reasons.
+  - A copyable/downloadable ChatGPT comparison prompt appears after a run. It
+    summarizes the ranking, assumptions, scores, warnings, freshness notes, and
+    skipped tickers, then asks ChatGPT to verify filings, earnings, guidance,
+    news, debt maturities, capital returns, risks, and competitive position
+    before building an independent ranking.
 
 - **Financial Health / Piotroski-Style Score**
   - Single-stock mode shows a transparent 0-9 scorecard with every signal,

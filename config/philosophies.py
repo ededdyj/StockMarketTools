@@ -51,7 +51,7 @@ PHILOSOPHIES: Dict[str, InvestmentPhilosophy] = {
             "Does not model scenario-specific capital structure changes.",
             "Assumes steady growth rather than cyclical swings.",
         ],
-        tools=["Single Stock Analysis", "SP500 Deals"],
+        tools=["Single Stock Analysis", "Single Stock Comparison", "SP500 Deals"],
     ),
     "Dividend/Income": InvestmentPhilosophy(
         name="Dividend/Income",
@@ -103,7 +103,7 @@ PHILOSOPHIES: Dict[str, InvestmentPhilosophy] = {
             "No explicit PEG or SaaS-specific metrics.",
             "Normalizes by percentile, so thin universes can distort ranks.",
         ],
-        tools=["Quality vs Value Screener"],
+        tools=["Single Stock Comparison", "Quality vs Value Screener"],
     ),
     "Momentum/Trend": InvestmentPhilosophy(
         name="Momentum/Trend",
