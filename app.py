@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 
 from data.fetcher import get_stock_data
 from data.market_inputs import get_market_inputs
+from data.sec_facts import clear_sec_filing_cache
 from models.dcf_fit import DcfFitResult, calculate_dcf_fit
 from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assumptions
 from models.dcf_warnings import DcfWarning, generate_dcf_warnings
@@ -46,6 +47,14 @@ from utils.fundamentals import extract_fundamentals, FundamentalsSnapshot
 from utils.dividends import estimate_annual_dividend_income
 from content.knowledge_map import get_knowledge_nodes
 from content.research_prompt import StockResearchPromptInputs, build_stock_research_prompt
+from ui.investment_review import (
+    MODE_KEY,
+    TICKER_KEY,
+    render_investment_review,
+    render_review_link,
+    render_watchlist,
+    with_reviewed_prices,
+)
 
 st.set_page_config(page_title="ESMT", layout="wide")
 st.title("ESMT")
@@ -59,6 +68,7 @@ MODE_DESCRIPTIONS: Dict[str, str] = {
     "Single Stock Comparison": "Compare a custom ticker list and rank best model-based value today.",
     "SP500 Deals": "Run a batch DCF to surface S&P 500 names trading below intrinsic value.",
     "Quality vs Value Screener": "Rank a universe by composite quality, growth, stability, and value scores.",
+    "Review Watchlist": "Compare saved reviews for existing holdings and new ideas.",
     "Knowledge Map": "Learn the assumptions, formulas, data sources, and limitations behind the app.",
 }
 
@@ -359,7 +369,7 @@ def get_user_scenario_assumptions(base: DcfAssumptions) -> dict[str, DcfAssumpti
     return scenarios
 
 
-def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
+def load_stock_bundle(ticker: str, timeframe_option: str, *, refresh: bool = False) -> Tuple[Dict, str]:
     """Fetch ticker data with cache fallback and return (data, timeframe_note)."""
 
     timeframe_kwargs, timeframe_note, _ = resolve_timeframe(timeframe_option)
@@ -367,6 +377,9 @@ def load_stock_bundle(ticker: str, timeframe_option: str) -> Tuple[Dict, str]:
     logger.info("Loading %s with timeframe %s", ticker, timeframe_option)
 
     try:
+        if refresh:
+            clear_sec_filing_cache()
+            _load_stock_bundle_cached.clear(ticker, timeframe_items)
         data = _load_stock_bundle_cached(ticker, timeframe_items)
     except Exception as exc:
         st.warning(
@@ -1360,7 +1373,7 @@ def render_knowledge_map():
 def single_stock_analysis(philosophy, mode_description: str):
     st.subheader(mode_description)
     default_ticker = DEFAULT_TICKERS.get(philosophy.name, "AAPL")
-    ticker = st.sidebar.text_input("Enter Stock Ticker", value=default_ticker).strip().upper()
+    ticker = st.sidebar.text_input("Enter Stock Ticker", value=default_ticker, key=TICKER_KEY).strip().upper()
 
     default_timeframe = PHILOSOPHY_TIMEFRAME_DEFAULTS.get(philosophy.name, "1 Year")
     timeframe_index = TIMEFRAME_CHOICES.index(default_timeframe) if default_timeframe in TIMEFRAME_CHOICES else TIMEFRAME_CHOICES.index("1 Year")
@@ -1371,7 +1384,8 @@ def single_stock_analysis(philosophy, mode_description: str):
         return
 
     try:
-        data, timeframe_note = load_stock_bundle(ticker, timeframe_option)
+        refresh = st.sidebar.button("Refresh company data")
+        data, timeframe_note = load_stock_bundle(ticker, timeframe_option, refresh=refresh)
     except Exception as exc:
         st.error(
             f"Unexpected error while retrieving data for {ticker}: {exc}."
@@ -1379,6 +1393,7 @@ def single_stock_analysis(philosophy, mode_description: str):
         )
         return
     if not data:
+        render_investment_review(ticker, {}, None, "", None, None, DEFAULT_DCF_ASSUMPTIONS)
         return
 
     info = data.get("info", {})
@@ -1419,6 +1434,16 @@ def single_stock_analysis(philosophy, mode_description: str):
         reset_label="Reset to dynamic defaults",
     )
     fcf_snapshot = get_user_fcf_selection(cashflow, quarterly_cashflow, ttm_cashflow, sec_fcf_snapshot)
+    reported_fcf = resolve_free_cash_flow(
+        cashflow, method="best_available",
+        quarterly_cashflow=quarterly_cashflow, ttm_cashflow=ttm_cashflow,
+        sec_fcf_snapshot=sec_fcf_snapshot,
+    )
+    fcf_basis = f"{reported_fcf.source} | {reported_fcf.period or 'Period unavailable'}" if reported_fcf.value is not None else ""
+    render_investment_review(
+        ticker, info, reported_fcf.value, fcf_basis,
+        fundamentals.net_debt, fundamentals.shares_outstanding, user_assumptions,
+    )
 
     warn_if_data_missing(info, history, cashflow, ticker)
 
@@ -1561,28 +1586,33 @@ def render_sp500_deals(philosophy_name: str, mode_description: str):
     if not assumptions_valid:
         st.error(f"DCF assumptions invalid: {assumption_error}")
         return
-    st.markdown("""
-Fair value is estimated using a simplified DCF model that:
-
-- Pulls the most recent Free Cash Flow.
-- Projects cash flow using the DCF assumptions in the sidebar.
-- Applies the sidebar terminal growth and discount rates.
-- Subtracts net debt (Total Debt − Cash) to convert Enterprise Value to Equity Value.
-- Divides Equity Value by the share-count resolver's selected shares to arrive
-  at a fair value per share.
-
-Companies missing any of those inputs are skipped, so treat this as a
-high-level triage for traditional value ideas. The Notes column flags share,
-cash, debt, and other valuation-input risks surfaced during batch processing.
-""")
-    with st.spinner("Analyzing S&P 500 companies..."):
-        sp500_result = analyze_sp500_deals(assumptions=user_assumptions)
+    st.caption(
+        "First-pass DCF using annual statements and the repository's saved constituent list. "
+        "The review page uses the best available current cash flow and lets you adjust it."
+    )
+    if st.button("Run S&P 500 screen"):
+        with st.spinner("Analyzing S&P 500 companies..."):
+            st.session_state["esmt_sp500_result"] = (user_assumptions, analyze_sp500_deals(assumptions=user_assumptions))
+    saved_result = st.session_state.get("esmt_sp500_result")
+    if saved_result is None:
+        return
+    run_assumptions, sp500_result = saved_result
+    if run_assumptions != user_assumptions:
+        st.info("The table uses the assumptions from the last run. Run the screen to apply your current settings.")
     sp500_df = sp500_result.dataframe
     if sp500_result.skipped:
         with st.expander(f"Skipped tickers ({len(sp500_result.skipped)})"):
             st.dataframe(pd.DataFrame([skip.__dict__ for skip in sp500_result.skipped]))
     if sp500_df is not None and not sp500_df.empty:
-        st.dataframe(sp500_df.reset_index(drop=True))
+        st.dataframe(
+            with_reviewed_prices(sp500_df.reset_index(drop=True)), hide_index=True,
+            column_config={
+                "Upside/Downside %": st.column_config.NumberColumn(format="percent"),
+                "Margin of Safety %": st.column_config.NumberColumn(format="percent"),
+                "Reviewed buy below": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
+        render_review_link(sp500_df["Ticker"].tolist(), "sp500", sp500_df)
     else:
         st.write("No data available from the S&P 500 analysis.")
 
@@ -1697,33 +1727,37 @@ Percentile-style component scores are only relative to the tickers entered here.
         st.info("Enter at least 2 tickers to run a comparison.")
         return
 
-    if not st.button("Run Comparison"):
+    if st.button("Run Comparison"):
+        progress = st.progress(0)
+        total = len(tickers)
+
+        def data_loader(ticker: str) -> Dict:
+            index = tickers.index(ticker)
+            progress.progress(index / total, text=f"Fetching and valuing {ticker}...")
+            data, _ = load_stock_bundle(ticker, "1 Year")
+            progress.progress((index + 1) / total, text=f"Completed {ticker}")
+            return data
+
+        with st.spinner("Comparing entered tickers..."):
+            st.session_state["esmt_comparison_result"] = (
+                (tickers, user_assumptions, philosophy_name),
+                compare_single_stocks(
+                    tickers, assumptions=user_assumptions, data_loader=data_loader,
+                    philosophy_name=philosophy_name,
+                ),
+            )
+        progress.empty()
+
+    last_run = st.session_state.get("esmt_comparison_result")
+    if last_run is None or last_run[0] != (tickers, user_assumptions, philosophy_name):
         return
-
-    progress = st.progress(0)
-    total = len(tickers)
-
-    def data_loader(ticker: str) -> Dict:
-        index = tickers.index(ticker)
-        progress.progress(index / total, text=f"Fetching and valuing {ticker}...")
-        data, _ = load_stock_bundle(ticker, "1 Year")
-        progress.progress((index + 1) / total, text=f"Completed {ticker}")
-        return data
-
-    with st.spinner("Comparing entered tickers..."):
-        result: ComparisonResult = compare_single_stocks(
-            tickers,
-            assumptions=user_assumptions,
-            data_loader=data_loader,
-            philosophy_name=philosophy_name,
-        )
-    progress.empty()
+    result: ComparisonResult = last_run[1]
 
     if result.skipped:
         with st.expander(f"Skipped / failed tickers ({len(result.skipped)})", expanded=True):
             st.dataframe(pd.DataFrame([skip.__dict__ for skip in result.skipped]), use_container_width=True)
 
-    comparison_df = result.dataframe
+    comparison_df = with_reviewed_prices(result.dataframe) if not result.dataframe.empty else result.dataframe
     if comparison_df.empty:
         st.warning("No ranked comparison rows were produced.")
         return
@@ -1741,6 +1775,7 @@ Percentile-style component scores are only relative to the tickers entered here.
         "Current Price",
         "App Fair Value",
         "Upside/Downside %",
+        "Margin of Safety %",
         "Value Score",
         "Financial Health Score",
         "Quality Score",
@@ -1752,13 +1787,17 @@ Percentile-style component scores are only relative to the tickers entered here.
         "Key Reason",
         "Missing Data / Warnings",
     ]
+    if "Reviewed buy below" in comparison_df:
+        display_columns.insert(5, "Reviewed buy below")
     st.dataframe(
         comparison_df[display_columns],
         use_container_width=True,
         column_config={
             "Current Price": st.column_config.NumberColumn(format="$%.2f"),
             "App Fair Value": st.column_config.NumberColumn(format="$%.2f"),
-            "Upside/Downside %": st.column_config.NumberColumn(format="%.1%"),
+            "Upside/Downside %": st.column_config.NumberColumn(format="percent"),
+            "Margin of Safety %": st.column_config.NumberColumn(format="percent"),
+            "Reviewed buy below": st.column_config.NumberColumn(format="$%.2f"),
             "Value Score": st.column_config.NumberColumn(format="%.2f"),
             "Financial Health Score": st.column_config.NumberColumn(format="%.2f"),
             "Quality Score": st.column_config.NumberColumn(format="%.2f"),
@@ -1768,6 +1807,7 @@ Percentile-style component scores are only relative to the tickers entered here.
             "Overall Comparison Score": st.column_config.NumberColumn(format="%.2f"),
         },
     )
+    render_review_link(comparison_df["Ticker"].tolist(), "comparison")
 
     with st.expander("Detailed comparison data", expanded=False):
         st.dataframe(comparison_df, use_container_width=True)
@@ -1800,6 +1840,7 @@ mode = st.sidebar.radio(
     "Select Tool",
     ordered_modes,
     format_func=lambda m: f"{m} ⭐" if m in philosophy.tools else m,
+    key=MODE_KEY,
 )
 st.sidebar.caption("⭐ Recommended for the selected philosophy.")
 st.sidebar.markdown("---")
@@ -1814,6 +1855,8 @@ elif mode == "SP500 Deals":
     render_sp500_deals(philosophy.name, MODE_DESCRIPTIONS[mode])
 elif mode == "Quality vs Value Screener":
     render_quality_value_screener(philosophy.name, MODE_DESCRIPTIONS[mode])
+elif mode == "Review Watchlist":
+    render_watchlist()
 elif mode == "Knowledge Map":
     render_knowledge_map()
 

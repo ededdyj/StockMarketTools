@@ -9,8 +9,22 @@ from models.free_cash_flow import FreeCashFlowSnapshot
 from utils.fundamentals import FundamentalsSnapshot
 
 
-LOW_FIT_KEYWORDS = ["bank", "insurance", "insurer", "reit", "fund", "etf"]
+LOW_FIT_KEYWORDS = [
+    "bank", "insurance", "insurer", "reit", "asset management",
+    "capital markets", "consumer finance", "mortgage", "investment holding",
+]
 CYCLICAL_KEYWORDS = ["hardware", "semiconductor", "automotive", "airline", "energy", "commodity"]
+
+
+def needs_specialized_valuation(info: dict) -> bool:
+    sector = str(info.get("sector", "")).strip().lower()
+    industry = str(info.get("industry") or "").lower()
+    quote_type = str(info.get("quoteType", "")).strip().lower()
+    return (
+        quote_type in {"etf", "mutualfund", "index"}
+        or (sector in {"financial", "financial services", "financials", "real estate"} and not industry)
+        or any(keyword in industry for keyword in LOW_FIT_KEYWORDS)
+    )
 
 
 @dataclass(frozen=True)
@@ -35,7 +49,7 @@ def calculate_dcf_fit(
     quote_type = str(info.get("quoteType", "")).lower()
     text = " ".join([sector, industry, quote_type])
 
-    if any(keyword in text for keyword in LOW_FIT_KEYWORDS):
+    if needs_specialized_valuation(info):
         score -= 45
         reasons.append("Business type often requires a specialized valuation model rather than a standard FCF DCF.")
 

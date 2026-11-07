@@ -27,6 +27,46 @@ class KnowledgeNode:
 
 KNOWLEDGE_NODES: list[KnowledgeNode] = [
     KnowledgeNode(
+        title="Investment Review and Entry Price",
+        category="Valuation",
+        summary="Combines sourced cash-flow adjustments, independent scenario inputs, and a saved entry price.",
+        why_it_matters="Makes assumptions about durable earnings power visible and comparable across saved reviews.",
+        inputs=[
+            "Reported or mid-cycle cash flow and its source and period",
+            "Signed cash-flow adjustments and filing or other source URLs",
+            "Debt less excess cash, shares, and independent bear, base, and bull assumptions",
+            "Target margin of safety and a timestamped market quote",
+        ],
+        calculations=[
+            "Normalized FCF = starting FCF + signed adjustments",
+            "Scenario starting FCF = normalized FCF + that scenario's cash-flow change",
+            "Buy-below price = base value per share × (1 − target margin of safety)",
+            "Upside/downside divides the value gap by price. Margin of safety divides it by positive fair value.",
+            "Reverse DCF solves the cash-flow growth rate implied by the quote under the base case's other inputs.",
+        ],
+        transparency_surfaces=[
+            "Single Stock Analysis > Investment Review",
+            "Review Watchlist > quote change since review and base value change since prior review",
+        ],
+        limitations=[
+            "Users verify adjustments, inputs, and qualitative evidence. Source links record the basis of a judgment.",
+            "Changing financing or excess cash treatment can change the value. Align the cash flows and equity bridge.",
+            "A saved review retains its prior assumptions until an updated case is saved.",
+        ],
+        sources=[
+            KnowledgeSource(
+                "Damodaran valuation data and teaching material",
+                "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html",
+                "Reference for projecting cash flows and choosing consistent discount rates.",
+            ),
+            KnowledgeSource(
+                "Deckers quarterly filing",
+                "https://ir.deckers.com/sec-filings/all-sec-filings/content/0001628280-26-068116/deck-20260930.htm",
+                "Source for the worked example's cash-flow and balance-sheet inputs.",
+            ),
+        ],
+    ),
+    KnowledgeNode(
         title="Discounted Cash Flow Valuation",
         category="Valuation",
         summary=(

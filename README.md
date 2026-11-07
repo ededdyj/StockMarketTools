@@ -8,6 +8,8 @@ multiple investment philosophies. The app centralizes:
 - **Single Stock Comparison** for ranking a custom list of individual tickers
   from best model-based value today to worst using app valuation and quality
   signals.
+- **Investment Review and Review Watchlist** for recording a thesis, normalizing
+  cash flow, comparing scenarios, and saving an entry price for a holding or new idea.
 - **ChatGPT research prompt exports** that package the single-stock analysis
   output into a copyable prompt for deeper external research and fair-value
   review.
@@ -18,8 +20,50 @@ multiple investment philosophies. The app centralizes:
 - **Knowledge Map** that explains the formulas, assumptions, data sources,
   limitations, and learning links behind each calculation-heavy feature.
 
-All data comes from the `yfinance` API and locally maintained ticker lists in
-`data/`.
+Market quotes and many statement inputs come from Yahoo Finance. Single-stock
+analysis can supplement those statements with SEC filing data. The screen uses
+the repository's saved constituent list in `data/`.
+
+## Reviewing an Investment
+
+1. From **Single Stock Analysis**, open **Investment Review**. You can also open
+   it from an S&P 500 or Single Stock Comparison result.
+2. Check the starting cash flow, its source and reporting period, debt less
+   excess cash, and shares outstanding. Add signed cash-flow adjustments with
+   source URLs. Keep the starting cash flow and the equity bridge consistent
+   when valuing excess cash separately.
+3. Set each scenario's cash-flow change relative to the normalized amount,
+   growth, required return, terminal growth, and projection years. Calculate
+   the review to see the scenario values, implied growth at the current quote,
+   and the buy-below price.
+4. Record why you'd own it, the evidence, and what would change your mind.
+   Save it as a holding or new idea. **Review Watchlist** compares the current
+   quote to your entry price and shows the valuation change after a second review.
+
+The **Load worked example** buttons demonstrate a dated Deckers filing review
+and an illustrative AMAT cycle stress test. Use **Refresh company data** to
+update the inputs available for a new review. An existing review keeps its saved
+assumptions until you change and save them.
+
+Reviews stay within the browser session by default. Download a backup from
+the watchlist and restore it in a later session. For automatic persistence on a
+private, single-user installation, start the app with:
+
+```bash
+ESMT_REVIEW_DB=./.esmt/reviews.sqlite3 streamlit run app.py
+```
+
+The configured database is shared by all sessions of that app instance. Use it
+on an instance that only you can access.
+
+**S&P 500 screening.** The first pass uses annual statements cached for an hour
+and quotes cached for 15 minutes. The results show statement periods, quote
+dates, and skip reasons. Quotes without a usable timestamp or more than five
+calendar days old, businesses requiring a specialized model, and cash flows
+that overlap a known spin-off are excluded. The spin-off guard uses the sourced
+events in `data/valuation_events.csv`, which must be maintained as events occur.
+Repeated provider throttling returns partial results with reasons for the
+unprocessed symbols.
 
 ## Investment Philosophy Toggle
 
@@ -154,7 +198,9 @@ not optimized to do.
 
 - **Value Score (Quality vs Value Screener)**
   - `ValueScore = max((FairValue - Price) / FairValue, 0)`.
-  - Discount % = `(FairValue - Price) / Price` to show upside in % terms.
+  - Upside/downside = `(FairValue - Price) / Price`.
+  - Margin of safety = `(FairValue - Price) / FairValue` when fair value is positive.
+  - Reviewed buy-below price = `BaseValue × (1 − TargetMarginOfSafety)`.
 
 - **Quality/Growth/Stability Scores**
   - ROE, revenue growth, and debt-to-equity pulled from `yfinance.info` then

@@ -13,6 +13,8 @@ from utils.fundamentals import extract_fundamentals
 from config.philosophies import get_philosophy
 from utils.paths import DATA_DIR
 from data.sec_facts import add_sec_fallback_to_statements
+from data.fetcher import is_rate_limit_error
+from models.investment_review import margin_of_safety
 from analysis.results import BatchAnalysisResult, SkippedTicker
 
 logger = logging.getLogger(__name__)
@@ -113,20 +115,6 @@ def get_tickers(universe: str, uploaded_file=None) -> List[str]:
     except Exception as e:
         st.error(f"Error loading {universe} tickers: {e}")
         return []
-
-
-def _is_rate_limit_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(
-        marker in message
-        for marker in [
-            "too many requests",
-            "rate limited",
-            "rate limit",
-            "429",
-            "try after a while",
-        ]
-    )
 
 
 def _safe_statement_frame(stock, attribute: str) -> pd.DataFrame:
@@ -244,9 +232,10 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
                 continue
 
             fair_value = valuation.fair_value_per_share
-            if fair_value is not None and fair_value > 0:
+            margin = margin_of_safety(current_price, fair_value)
+            if margin is not None:
                 discount_pct = ((fair_value - current_price) / current_price) * 100
-                value_score = max((fair_value - current_price) / fair_value, 0)
+                value_score = max(margin, 0)
             else:
                 discount_pct = None
                 value_score = 0
@@ -270,7 +259,8 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
                 "Company": info.get("longName", ""),
                 "Current Price": current_price,
                 "Fair Value": fair_value,
-                "Discount (%)": discount_pct,
+                "Upside/Downside (%)": discount_pct,
+                "Margin of Safety (%)": 100 * margin if margin is not None else None,
                 "Value Score": value_score,
                 "Financial Health Raw Score": financial_health.score,
                 "Financial Health Available Signals": financial_health.available_signals,
@@ -292,7 +282,7 @@ def analyze_quality_value_screener(assumptions: DcfAssumptions = SCREENER_DCF_AS
             })
             consecutive_rate_limits = 0
         except Exception as exc:
-            if _is_rate_limit_error(exc):
+            if is_rate_limit_error(exc):
                 logger.warning("Yahoo rate limit while analyzing %s: %s", ticker, exc)
                 skipped.append(SkippedTicker(ticker, "rate_limited", str(exc)))
                 consecutive_rate_limits += 1

@@ -14,6 +14,7 @@ from typing import Callable, Iterable, Optional
 import pandas as pd
 
 from analysis.results import SkippedTicker
+from models.investment_review import margin_of_safety
 from models.dcf_fit import calculate_dcf_fit
 from models.dcf_warnings import DcfWarning, generate_dcf_warnings
 from models.financial_health import calculate_financial_health
@@ -223,7 +224,7 @@ def build_comparison_row(
         "App Fair Value": fair_value,
         "Fair Value Range": range_text,
         "Upside/Downside %": upside_downside,
-        "Margin of Safety %": upside_downside,
+        "Margin of Safety %": margin_of_safety(current_price, fair_value),
         "Market Cap": info.get("marketCap"),
         "Trailing PE": info.get("trailingPE"),
         "Forward PE": info.get("forwardPE"),

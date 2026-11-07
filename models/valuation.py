@@ -245,12 +245,14 @@ def calculate_scenario_valuations(
     shares_outstanding: Optional[float],
     current_price: Optional[float],
     scenarios: dict[str, DcfAssumptions],
+    *,
+    starting_fcf_by_scenario: Optional[dict[str, float]] = None,
 ) -> list[ScenarioValuation]:
     results = []
     for name, assumptions in scenarios.items():
         warnings = []
         valuation = _discounted_cash_flow_from_starting_fcf(
-            starting_fcf=starting_fcf,
+            starting_fcf=(starting_fcf_by_scenario or {}).get(name, starting_fcf),
             assumptions=assumptions,
             net_debt=net_debt,
             shares_outstanding=shares_outstanding,

@@ -230,6 +230,12 @@ def get_sec_free_cash_flow_snapshot(ticker: str) -> tuple[Optional[FreeCashFlowS
         return None, [f"SEC EDGAR FCF lookup failed for {ticker}: {exc}"]
 
 
+def clear_sec_filing_cache() -> None:
+    """Allow an explicit company refresh to fetch updated filing data."""
+    get_sec_financial_health_statements.cache_clear()
+    get_sec_free_cash_flow_snapshot.cache_clear()
+
+
 def merge_statement_frame(primary: Optional[pd.DataFrame], fallback: Optional[pd.DataFrame]) -> pd.DataFrame:
     primary = _normalize_statement_columns(primary if primary is not None else pd.DataFrame())
     fallback = _normalize_statement_columns(fallback if fallback is not None else pd.DataFrame())

@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pandas as pd
@@ -16,6 +17,7 @@ class _Progress:
 class _Stock:
     info = {
         "currentPrice": 10.0,
+        "regularMarketTime": datetime.now(timezone.utc).timestamp(),
         "longName": "Example Co",
         "sharesOutstanding": 100,
     }
@@ -87,6 +89,35 @@ def test_sp500_screener_passes_custom_assumptions(monkeypatch):
     assert captured["assumptions"] == custom_assumptions
     assert result.dataframe is not None
     assert result.dataframe.iloc[0]["Ticker"] == "AAA"
+
+
+def test_sp500_excludes_mismatched_or_unusable_inputs(monkeypatch):
+    tickers = ["BANK", "STALE", "CTVA", "V"]
+    now = datetime.now(timezone.utc)
+
+    def stock_for(ticker):
+        stock = _Stock()
+        stock.info = {**stock.info, "regularMarketTime": now.timestamp()}
+        if ticker == "BANK":
+            stock.info["sector"] = "Financial Services"
+        elif ticker == "STALE":
+            stock.info["regularMarketTime"] = (now - timedelta(days=10)).timestamp()
+        elif ticker == "V":
+            stock.info.update(sector="Financial Services", industry="Credit Services")
+        return stock
+
+    monkeypatch.setattr(sp500_deals, "get_sp500_tickers", lambda: tickers)
+    monkeypatch.setattr(sp500_deals.st, "progress", lambda value: _Progress())
+    monkeypatch.setattr(sp500_deals.yf, "Ticker", stock_for)
+    result = sp500_deals.analyze_sp500_deals()
+
+    assert dict((item.ticker, item.reason) for item in result.skipped) == {
+        "BANK": "specialized_valuation", "STALE": "unverified_quote", "CTVA": "corporate_action_mismatch",
+    }
+    assert list(result.dataframe["Ticker"]) == ["V"]
+    row = result.dataframe.iloc[0]
+    assert row["Upside/Downside %"] != row["Margin of Safety %"]
+    assert row["Quote date (UTC)"] == now.date().isoformat()
 
 
 def test_quality_value_screener_includes_financial_health(monkeypatch):

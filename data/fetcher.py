@@ -4,6 +4,13 @@ import pandas as pd
 from data.sec_facts import add_sec_fallback_to_statements, get_sec_free_cash_flow_snapshot
 
 
+def is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in (
+        "too many requests", "rate limited", "rate limit", "429", "try after a while",
+    ))
+
+
 def _safe_statement_frame(stock, attribute: str) -> pd.DataFrame:
     try:
         frame = getattr(stock, attribute, pd.DataFrame())
