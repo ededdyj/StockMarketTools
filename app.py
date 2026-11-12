@@ -19,17 +19,12 @@ from models.dividend_yield import resolve_dividend_yield
 from models.free_cash_flow import FreeCashFlowSnapshot, resolve_free_cash_flow
 from models.income_metrics import resolve_income_metrics
 from models.investment_review import finite_number
-from models.provenance import DataFreshnessReport, build_valuation_input_provenance
+from models.provenance import DataFreshnessReport, build_valuation_input_provenance, with_active_dcf_assumptions
 from models.valuation import (
     DcfAssumptions,
     ScenarioValuation,
     ValuationResult,
-    calculate_fair_value,
-    calculate_fair_value_range,
-    calculate_scenario_valuations,
-    calculate_sensitivity_table,
-    default_scenarios,
-    reverse_dcf_implied_growth,
+    calculate_dcf_analysis,
 )
 from models.financial_health import calculate_financial_health, FinancialHealthResult
 from utils.charts import plot_price_history, plot_cashflow
@@ -57,6 +52,7 @@ from ui.investment_review import (
     render_watchlist,
     with_reviewed_prices,
 )
+from ui.dcf_scenarios import get_user_scenario_assumptions
 
 st.set_page_config(page_title="ESMT", layout="wide")
 st.title("ESMT")
@@ -358,51 +354,6 @@ def get_user_fcf_selection(
         )
         fallback_method = "user_override" if method == "user_override" else "latest_fiscal_year"
         return resolve_free_cash_flow(cashflow, method=fallback_method, user_normalized_fcf=user_override)
-
-
-def get_user_scenario_assumptions(base: DcfAssumptions) -> dict[str, DcfAssumptions]:
-    scenarios = default_scenarios(base)
-    with st.expander("Bull / Base / Bear Scenario Assumptions", expanded=False):
-        st.caption(
-            "Each scenario reuses the same starting FCF, net debt, and share count; edit rates to stress-test valuation. "
-            "These editable scenario controls are separate from the headline DCF sidebar assumptions."
-        )
-        for name, defaults in list(scenarios.items()):
-            cols = st.columns(3)
-            with cols[0]:
-                growth = st.number_input(
-                    f"{name} Growth (%)",
-                    value=defaults.growth_rate * 100,
-                    min_value=-50.0,
-                    max_value=50.0,
-                    format="%.2f",
-                    key=f"scenario_{name.lower()}_growth",
-                ) / 100.0
-            with cols[1]:
-                discount = st.number_input(
-                    f"{name} Discount (%)",
-                    value=defaults.discount_rate * 100,
-                    min_value=-50.0,
-                    max_value=50.0,
-                    format="%.2f",
-                    key=f"scenario_{name.lower()}_discount",
-                ) / 100.0
-            with cols[2]:
-                terminal = st.number_input(
-                    f"{name} Terminal (%)",
-                    value=defaults.terminal_growth_rate * 100,
-                    min_value=-50.0,
-                    max_value=50.0,
-                    format="%.2f",
-                    key=f"scenario_{name.lower()}_terminal",
-                ) / 100.0
-            scenarios[name] = DcfAssumptions(
-                discount_rate=discount,
-                growth_rate=growth,
-                terminal_growth_rate=terminal,
-                projection_years=base.projection_years,
-            )
-    return scenarios
 
 
 def load_stock_bundle(ticker: str, timeframe_option: str, *, refresh: bool = False) -> Tuple[Dict, str]:
@@ -1088,26 +1039,10 @@ def render_scenario_section(
     st.subheader("Bull / Base / Bear DCF Scenarios")
     if active_assumptions and active_valuation:
         st.caption(
-            "The headline DCF above uses the active sidebar assumptions. "
-            "The scenario table below is editable and may differ if scenario controls were changed."
+            "Base (Active DCF) matches the headline valuation and the active sidebar assumptions. "
+            "Bear and Bull vary rates around that case and can be edited above."
         )
     rows = []
-    if active_assumptions and active_valuation:
-        rows.append(
-            {
-                "Scenario": "Active DCF",
-                "Qualitative Case": "Headline valuation using the current DCF sidebar assumptions.",
-                "Starting FCF": format_currency(active_valuation.starting_fcf, 0),
-                "Growth": format_percent(active_assumptions.growth_rate, 1),
-                "Discount": format_percent(active_assumptions.discount_rate, 1),
-                "Terminal Growth": format_percent(active_assumptions.terminal_growth_rate, 1),
-                "Net Debt": format_currency(active_valuation.net_debt, 0),
-                "Shares Used": format_int(active_valuation.shares_used),
-                "Fair Value / Share": format_currency(active_valuation.fair_value_per_share),
-                "Upside / Downside": "N/A",
-                "Warnings": "",
-            }
-        )
     for scenario in scenarios:
         valuation = scenario.valuation
         thesis = getattr(
@@ -1117,12 +1052,13 @@ def render_scenario_section(
         )
         rows.append(
             {
-                "Scenario": f"{scenario.name} Scenario",
+                "Scenario": "Base (Active DCF)" if scenario.name == "Base" else f"{scenario.name} Scenario",
                 "Qualitative Case": thesis,
                 "Starting FCF": format_currency(valuation.starting_fcf, 0) if valuation else "N/A",
                 "Growth": format_percent(scenario.assumptions.growth_rate, 1),
                 "Discount": format_percent(scenario.assumptions.discount_rate, 1),
                 "Terminal Growth": format_percent(scenario.assumptions.terminal_growth_rate, 1),
+                "Years": scenario.assumptions.projection_years,
                 "Net Debt": format_currency(valuation.net_debt, 0) if valuation else "N/A",
                 "Shares Used": format_int(valuation.shares_used) if valuation else "N/A",
                 "Fair Value / Share": format_currency(valuation.fair_value_per_share) if valuation else "N/A",
@@ -1135,7 +1071,10 @@ def render_scenario_section(
 
 def render_sensitivity_section(sensitivity: pd.DataFrame):
     st.subheader("DCF Sensitivity")
-    st.caption("Rows vary terminal growth; columns vary discount rate. Invalid/too-close combinations are blank.")
+    st.caption(
+        "Rows vary terminal growth; columns vary discount rate around the active DCF. "
+        "The active center cell matches the headline; other invalid/too-close combinations are blank."
+    )
     if sensitivity.empty:
         st.write("Sensitivity table unavailable.")
         return
@@ -1213,7 +1152,9 @@ def render_dcf_section(
 
     if fair_value_range:
         st.caption(
-            f"Fair Value Confidence Interval: {format_currency(fair_value_range[0])} - {format_currency(fair_value_range[1])}"
+            f"Fair Value Sensitivity Range: {format_currency(fair_value_range[0])} - {format_currency(fair_value_range[1])}. "
+            "Varies the active discount rate by ±2 percentage points and FCF growth by ±1 point; "
+            "terminal growth and projection years stay fixed."
         )
     elif valuation.fair_value_per_share is None:
         st.info("Per-share valuation requires a reliable share count; Yahoo Finance did not supply one.")
@@ -1223,6 +1164,10 @@ def render_dcf_section(
     render_scenario_section(scenarios, assumptions, valuation)
     render_sensitivity_section(sensitivity)
     st.subheader("Reverse DCF")
+    st.caption(
+        f"Uses the active discount rate ({assumptions.discount_rate:.2%}), terminal growth "
+        f"({assumptions.terminal_growth_rate:.2%}), and {assumptions.projection_years}-year horizon."
+    )
     st.write(reverse_dcf.message)
 
     assumption_rows = [
@@ -1238,7 +1183,7 @@ def render_dcf_section(
             format_percent(assumptions.growth_rate, 1),
             format_percent(default_assumptions.growth_rate, 1),
             "Yes" if assumptions.growth_rate != default_assumptions.growth_rate else "No",
-            "Years 1-5 FCF growth",
+            f"Years 1-{assumptions.projection_years} FCF growth",
         ),
         (
             "Terminal Growth",
@@ -1547,58 +1492,20 @@ def single_stock_analysis(philosophy, mode_description: str):
     render_price_section(history, ticker, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
     if assumptions_valid:
-        prompt_valuation = None
-        prompt_fair_value_range = None
-        scenarios = []
-        sensitivity = pd.DataFrame()
-        reverse_dcf = reverse_dcf_implied_growth(
-            None,
-            None,
-            None,
-            None,
-            user_assumptions.discount_rate,
-            user_assumptions.terminal_growth_rate,
-            user_assumptions.projection_years,
-        )
+        scenario_assumptions = None
         if fcf_snapshot.value is not None:
-            prompt_valuation = calculate_fair_value(
-                cashflow,
-                net_debt=fundamentals.net_debt,
-                shares_outstanding=fundamentals.shares_outstanding,
-                assumptions=user_assumptions,
-                starting_fcf=fcf_snapshot.value,
-            )
-            prompt_fair_value_range = calculate_fair_value_range(
-                cashflow,
-                net_debt=fundamentals.net_debt,
-                shares_outstanding=fundamentals.shares_outstanding,
-                assumptions=user_assumptions,
-                starting_fcf=fcf_snapshot.value,
-            )
-            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
-            scenario_assumptions = get_user_scenario_assumptions(user_assumptions)
-            scenarios = calculate_scenario_valuations(
-                fcf_snapshot.value,
-                fundamentals.net_debt,
-                fundamentals.shares_outstanding,
-                current_price,
-                scenario_assumptions,
-            )
-            sensitivity = calculate_sensitivity_table(
-                fcf_snapshot.value,
-                fundamentals.net_debt,
-                fundamentals.shares_outstanding,
-                user_assumptions,
-            )
-            reverse_dcf = reverse_dcf_implied_growth(
-                current_price,
-                fundamentals.shares_outstanding,
-                fundamentals.net_debt,
-                fcf_snapshot.value,
-                user_assumptions.discount_rate,
-                user_assumptions.terminal_growth_rate,
-                user_assumptions.projection_years,
-            )
+            scenario_assumptions = get_user_scenario_assumptions(user_assumptions, state_key=ticker)
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
+        dcf_analysis = calculate_dcf_analysis(
+            fcf_snapshot.value, fundamentals.net_debt, fundamentals.shares_outstanding,
+            current_price, user_assumptions, scenario_assumptions,
+        )
+        user_assumptions = dcf_analysis.assumptions
+        prompt_valuation = dcf_analysis.valuation
+        prompt_fair_value_range = dcf_analysis.fair_value_range
+        scenarios = dcf_analysis.scenarios
+        sensitivity = dcf_analysis.sensitivity
+        reverse_dcf = dcf_analysis.reverse_dcf
         dcf_warnings = generate_dcf_warnings(
             info,
             fundamentals,
@@ -1620,6 +1527,7 @@ def single_stock_analysis(philosophy, mode_description: str):
             valuation_financials,
             income_metrics,
         )
+        provenance_report = with_active_dcf_assumptions(provenance_report, user_assumptions)
         dcf_fit = calculate_dcf_fit(info, fundamentals, fcf_snapshot, dcf_warnings)
         render_data_freshness_summary(provenance_report)
         render_dcf_section(

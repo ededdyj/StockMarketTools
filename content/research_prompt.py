@@ -191,16 +191,22 @@ def _format_fcf_snapshot(snapshot: Optional[FreeCashFlowSnapshot]) -> list[str]:
     ]
 
 
-def _format_scenarios(scenarios: Optional[list[ScenarioValuation]]) -> list[str]:
+def _format_scenarios(
+    scenarios: Optional[list[ScenarioValuation]], active_assumptions: Optional[DcfAssumptions] = None,
+) -> list[str]:
     if not scenarios:
         return ["- Scenario DCF unavailable."]
     rows = []
     for scenario in scenarios:
         valuation = scenario.valuation
+        label = scenario.name
+        if scenario.name == "Base" and scenario.assumptions == active_assumptions:
+            label = "Base (Active DCF)"
         rows.append(
-            f"- {scenario.name}: fair value {_money(valuation.fair_value_per_share) if valuation else 'N/A'}, "
+            f"- {label}: fair value {_money(valuation.fair_value_per_share) if valuation else 'N/A'}, "
             f"growth {_percent(scenario.assumptions.growth_rate)}, discount {_percent(scenario.assumptions.discount_rate)}, "
-            f"terminal {_percent(scenario.assumptions.terminal_growth_rate)}, upside/downside {_percent(scenario.upside_downside, 1)}"
+            f"terminal {_percent(scenario.assumptions.terminal_growth_rate)}, years {scenario.assumptions.projection_years}, "
+            f"upside/downside {_percent(scenario.upside_downside, 1)}"
         )
         if scenario.warnings:
             rows.extend(f"  - Warning: {warning}" for warning in scenario.warnings)
@@ -398,12 +404,15 @@ def build_stock_research_prompt(inputs: StockResearchPromptInputs) -> str:
         *_format_health_signals(inputs.financial_health),
         "",
         "Bull/base/bear scenario output from the app:",
-        *_format_scenarios(inputs.scenarios),
+        "- Base (Active DCF) uses the headline assumptions. Bear/Bull are alternative rate cases using the same FCF, net debt, shares, and horizon.",
+        *_format_scenarios(inputs.scenarios, inputs.assumptions),
         "",
         "DCF sensitivity table from the app:",
+        "- Anchored to the active DCF: FCF growth and projection years stay fixed; rows vary terminal growth and columns vary discount rate.",
         *_format_sensitivity(inputs.sensitivity_table),
         "",
         "Reverse DCF from the app:",
+        "- Uses the active DCF discount rate, terminal growth, projection years, starting FCF, net debt, and shares; solves for FCF growth.",
         f"- {inputs.reverse_dcf.message if inputs.reverse_dcf else 'Reverse DCF unavailable.'}",
         "",
         "Known app limitations to account for in your research:",

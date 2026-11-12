@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 import numpy as np
@@ -67,6 +67,18 @@ class ReverseDcfResult:
     target_equity_value: Optional[float]
     message: str
     valid: bool
+
+
+@dataclass(frozen=True)
+class DcfAnalysis:
+    """Related single-stock outputs calculated from one active input snapshot."""
+
+    assumptions: DcfAssumptions
+    valuation: Optional[ValuationResult]
+    fair_value_range: Optional[tuple[float, float]]
+    scenarios: list[ScenarioValuation]
+    sensitivity: pd.DataFrame
+    reverse_dcf: ReverseDcfResult
 
 
 def _latest_period_column(frame) -> Optional[str]:
@@ -266,7 +278,7 @@ def calculate_scenario_valuations(
             upside = (valuation.fair_value_per_share - current_price) / current_price
         thesis_map = {
             "Bear": "FCF normalization/downcycle, lower margins, slower growth, higher discount rate.",
-            "Base": "Management guidance partially achieved, moderate FCF conversion, stable terminal growth.",
+            "Base": "Base assumptions for this analysis; not an assessment of management guidance.",
             "Bull": "Sustained growth, strong FCF conversion, buybacks, durable margin structure.",
         }
         results.append(ScenarioValuation(name, assumptions, valuation, upside, thesis_map.get(name, ""), warnings))
@@ -311,7 +323,8 @@ def calculate_sensitivity_table(
             discount_rate = base_assumptions.discount_rate + discount_delta
             terminal_growth = base_assumptions.terminal_growth_rate + terminal_delta
             column = discount_rate
-            if discount_rate <= terminal_growth or discount_rate - terminal_growth < 0.005:
+            is_active_cell = discount_delta == 0 and terminal_delta == 0
+            if discount_rate <= terminal_growth or (not is_active_cell and discount_rate - terminal_growth < 0.005):
                 row[column] = None
                 continue
             assumptions = DcfAssumptions(
@@ -386,3 +399,50 @@ def reverse_dcf_implied_growth(
         "under the selected discount rate and terminal growth assumptions."
     )
     return ReverseDcfResult(implied_growth, target_enterprise_value, target_equity_value, message, True)
+
+
+def calculate_dcf_analysis(
+    starting_fcf: Optional[float],
+    net_debt: Optional[float],
+    shares_outstanding: Optional[float],
+    current_price: Optional[float],
+    assumptions: DcfAssumptions,
+    scenario_assumptions: Optional[dict[str, DcfAssumptions]] = None,
+) -> DcfAnalysis:
+    """Anchor the headline, Base, range, sensitivity and reverse DCF together.
+
+    Only Bear/Bull may override the active rates. Independent investment reviews
+    continue to use calculate_scenario_valuations directly for their own cases.
+    """
+    active = replace(assumptions)
+    valid, _ = active.validate()
+    valuation = None
+    fair_value_range = None
+    scenarios = []
+    sensitivity = pd.DataFrame()
+    if valid and starting_fcf is not None:
+        valuation = calculate_fair_value(
+            None, net_debt, shares_outstanding, active, starting_fcf,
+        )
+        fair_value_range = calculate_fair_value_range(
+            None, net_debt, shares_outstanding, active, starting_fcf,
+        )
+        cases = default_scenarios(active)
+        for name in ("Bear", "Bull"):
+            if scenario_assumptions and name in scenario_assumptions:
+                cases[name] = replace(
+                    scenario_assumptions[name], projection_years=active.projection_years,
+                )
+        cases["Base"] = active
+        scenarios = calculate_scenario_valuations(
+            starting_fcf, net_debt, shares_outstanding, current_price, cases,
+        )
+        sensitivity = calculate_sensitivity_table(
+            starting_fcf, net_debt, shares_outstanding, active,
+        )
+    reverse = reverse_dcf_implied_growth(
+        current_price, shares_outstanding, net_debt,
+        starting_fcf if valid else None,
+        active.discount_rate, active.terminal_growth_rate, active.projection_years,
+    )
+    return DcfAnalysis(active, valuation, fair_value_range, scenarios, sensitivity, reverse)

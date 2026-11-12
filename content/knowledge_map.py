@@ -558,7 +558,7 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
     KnowledgeNode(
         title="Scenario DCF",
         category="Valuation",
-        summary="Calculates bear, base, and bull valuation cases using editable growth, discount, and terminal assumptions.",
+        summary="Anchors single-stock Base to the active headline DCF, with editable Bear/Bull rate cases.",
         why_it_matters="A single DCF point estimate hides uncertainty; scenarios reveal the range of plausible outcomes.",
         inputs=[
             "Starting FCF",
@@ -567,6 +567,8 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
         calculations=[
             "Each scenario reuses the DCF equity bridge",
+            "Single-stock Base uses the active sidebar rates; headline, range, grid, and reverse DCF share one input snapshot",
+            "Bear/Bull rates reset when the ticker or active assumptions change; all cases share the active horizon",
             "Upside/downside = scenario fair value per share / current price - 1",
         ],
         transparency_surfaces=[
@@ -577,6 +579,7 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         limitations=[
             "Default scenarios are generic and should be edited for the company thesis.",
             "Scenarios do not model explicit margin, segment, or capital-allocation paths.",
+            "Independent saved Investment Reviews have their own explicitly chosen cases.",
         ],
         sources=[
             KnowledgeSource(
@@ -598,6 +601,8 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
         calculations=[
             "Recalculate fair value for each discount-rate and terminal-growth pair",
+            "The active discount/terminal pair matches headline/Base fair value, holding active FCF growth and horizon fixed",
+            "The separate headline range varies discount and FCF growth instead of terminal growth",
             "Mark cells invalid when terminal growth is greater than or too close to discount rate",
         ],
         transparency_surfaces=[

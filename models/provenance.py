@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from math import isclose
 import re
 from typing import Optional
 
@@ -13,6 +14,7 @@ from data.market_inputs import MarketInputs
 from models.dcf_assumptions import DynamicDcfEstimate
 from models.free_cash_flow import FreeCashFlowSnapshot
 from models.income_metrics import IncomeMetricsSnapshot
+from models.valuation import DcfAssumptions
 from utils.fundamentals import FundamentalsSnapshot
 
 
@@ -43,6 +45,38 @@ class DataFreshnessReport:
     run_timestamp: str
     rows: list[ValuationInputProvenance]
     warnings: list[str] = field(default_factory=list)
+
+
+def with_active_dcf_assumptions(
+    report: DataFreshnessReport, assumptions: DcfAssumptions,
+) -> DataFreshnessReport:
+    """Show the rates actually used, retaining generated defaults as provenance."""
+    active_values = {
+        "Discount Rate / WACC": assumptions.discount_rate,
+        "Explicit FCF Growth": assumptions.growth_rate,
+        "Terminal Growth": assumptions.terminal_growth_rate,
+    }
+    rows = []
+    for row in report.rows:
+        if row.name not in active_values:
+            rows.append(row)
+            continue
+        active = active_values[row.name]
+        if isinstance(row.value, (int, float)) and isclose(row.value, active, abs_tol=1e-12):
+            rows.append(replace(row, value=active))
+        else:
+            default = f"{row.value:.2%}" if isinstance(row.value, (int, float)) else "unavailable"
+            rows.append(replace(
+                row, value=active, source="Active DCF sidebar assumption (user override)",
+                category="User assumption",
+                formula=f"User-selected active rate; generated default {default} from {row.source}. {row.formula}",
+            ))
+    rows.append(ValuationInputProvenance(
+        name="Projection Years", value=assumptions.projection_years,
+        source="Active DCF sidebar assumption", formula="Explicit FCF forecast horizon",
+        retrieval_timestamp=report.run_timestamp, category="User assumption",
+    ))
+    return replace(report, rows=rows)
 
 
 def parse_date(value: Optional[str]) -> Optional[pd.Timestamp]:

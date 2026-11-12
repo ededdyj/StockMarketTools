@@ -24,6 +24,9 @@ Market quotes and many statement inputs come from Yahoo Finance. Single-stock
 analysis can supplement those statements with SEC filing data. The screen uses
 the repository's saved constituent list in `data/`.
 
+The prioritized [valuation improvement backlog](docs/VALUATION_IMPROVEMENTS.md)
+records the PLTR review findings and implementation status.
+
 The single-stock price panel automatically checks Yahoo Finance every 15 seconds
 while the session is open. All chart windows share the same quote cache and show
 the provider's quote time. Provider data may be delayed; this is polling Yahoo's
@@ -195,9 +198,15 @@ not optimized to do.
   - Single-stock mode shows a compact Data Timing & Freshness summary and warns
     when current market data is mixed with annual financial statement data older
     than 120 days.
-  - Scenario tables include an "Active DCF" row for the headline valuation, then
-    separate editable Bear/Base/Bull scenario rows so user-edited scenario
-    controls are not confused with the active sidebar assumptions.
+  - Single-stock analysis calculates the headline, range, scenarios, sensitivity
+    grid, and reverse DCF from one active input snapshot. **Base (Active DCF)**
+    always matches the headline. Bear/Bull rates remain editable and reset when
+    the ticker or active assumptions change; an explicit reset button restores
+    their defaults. All cases share starting FCF, net debt, shares, and horizon.
+  - Active sidebar overrides appear in input provenance and research exports;
+    generated defaults remain separately labeled. The headline sensitivity range
+    varies discount rate and FCF growth, while the sensitivity grid varies
+    discount rate and terminal growth, both around the same active case.
   - DCF Fit labels the model suitability as High, Medium, or Low based on FCF
     availability, warning severity, share reliability, fallbacks, and whether the
     company type often requires a specialized model.

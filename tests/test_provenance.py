@@ -9,6 +9,9 @@ from models.provenance import (
     build_valuation_input_provenance,
     freshness_label,
     parse_date,
+    DataFreshnessReport,
+    ValuationInputProvenance,
+    with_active_dcf_assumptions,
 )
 from models.valuation import DcfAssumptions
 from utils.fundamentals import FundamentalsSnapshot
@@ -87,3 +90,22 @@ def test_build_valuation_input_provenance_includes_categories_and_stale_warning(
     assert revenue.period_or_as_of == "TTM through 2026-03-31"
     assert any(row.category == "Official filing data" for row in report.rows)
     assert any("more than 120 days old" in warning for warning in report.warnings)
+
+
+def test_active_assumptions_replace_default_provenance_without_changing_source_report():
+    report = DataFreshnessReport("2026-11-12", [
+        ValuationInputProvenance("Discount Rate / WACC", 0.1293, "WACC estimate", "CAPM"),
+        ValuationInputProvenance("Explicit FCF Growth", 0.12, "Recent growth blend", "Clamp"),
+        ValuationInputProvenance("Terminal Growth", 0.03, "Conservative cap", "Cap"),
+        ValuationInputProvenance("Free Cash Flow", 100, "Test cash flow", "OCF - capex"),
+    ])
+    active = with_active_dcf_assumptions(report, DcfAssumptions(0.11, 0.08, 0.03, 8))
+    rows = {row.name: row for row in active.rows}
+    assert rows["Discount Rate / WACC"].value == 0.11
+    assert rows["Explicit FCF Growth"].value == 0.08
+    assert rows["Discount Rate / WACC"].category == "User assumption"
+    assert "12.93%" in rows["Discount Rate / WACC"].formula
+    assert rows["Terminal Growth"].source == "Conservative cap"
+    assert rows["Free Cash Flow"].value == 100
+    assert rows["Projection Years"].value == 8
+    assert report.rows[0].value == 0.1293
