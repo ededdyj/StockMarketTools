@@ -12,6 +12,7 @@ from models.investment_review import finite_number
 QUOTE_REFRESH_SECONDS = 15
 QUOTE_FIELDS = (
     "regularMarketPrice", "currentPrice", "regularMarketTime",
+    "previousClose", "regularMarketPreviousClose",
     "preMarketPrice", "preMarketTime", "postMarketPrice", "postMarketTime",
 )
 
@@ -33,6 +34,13 @@ def fetch_quote_info(ticker: str) -> dict:
         "currentPrice": price,
         "regularMarketTime": metadata.get("regularMarketTime"),
     }
+    # This request covers one day, so the chart baseline is the prior session's close.
+    previous_close = next(
+        (metadata.get(field) for field in ("chartPreviousClose", "previousClose")
+         if finite_number(metadata.get(field)) and metadata[field] > 0),
+        None,
+    )
+    info.update(previousClose=previous_close, regularMarketPreviousClose=previous_close)
     # Extended-hours bars are separate from the regular-session quote.
     if not history.empty and isinstance(history.index, pd.DatetimeIndex) and "Close" in history:
         closes = history["Close"].dropna().sort_index()
@@ -48,6 +56,25 @@ def fetch_quote_info(ticker: str) -> dict:
                 info[f"{session}MarketPrice"] = float(session_closes.iloc[-1])
                 info[f"{session}MarketTime"] = session_closes.index[-1].timestamp()
     return info
+
+
+def daily_price_change(info: dict) -> tuple[float | None, float | None]:
+    """Return dollar and percent change from the previous regular-session close."""
+
+    price = next(
+        (info.get(field) for field in ("regularMarketPrice", "currentPrice")
+         if finite_number(info.get(field)) and info[field] > 0),
+        None,
+    )
+    previous_close = next(
+        (info.get(field) for field in ("regularMarketPreviousClose", "previousClose")
+         if finite_number(info.get(field)) and info[field] > 0),
+        None,
+    )
+    if price is None or previous_close is None:
+        return None, None
+    change = price - previous_close
+    return change, change / previous_close * 100.0
 
 
 @dataclass(frozen=True)

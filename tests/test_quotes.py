@@ -13,6 +13,7 @@ def test_live_quote_keeps_regular_and_extended_hours_separate(monkeypatch):
     class FakeTicker:
         history_metadata = {
             "regularMarketPrice": 150.5,
+            "chartPreviousClose": 151.0,
             "regularMarketTime": pd.Timestamp("2026-11-12 21:00:00Z").timestamp(),
             "currentTradingPeriod": {
                 "pre": {
@@ -40,6 +41,9 @@ def test_live_quote_keeps_regular_and_extended_hours_separate(monkeypatch):
 
     assert info["regularMarketPrice"] == 150.5
     assert info["currentPrice"] == 150.5
+    assert info["previousClose"] == 151.0
+    assert info["regularMarketPreviousClose"] == 151.0
+    assert quotes.daily_price_change(info) == pytest.approx((-0.5, -0.5 / 151.0 * 100))
     assert info["preMarketPrice"] == 149.0
     assert info["postMarketPrice"] == 152.0
     assert info["postMarketTime"] == times[-1].timestamp()
@@ -56,3 +60,16 @@ def test_live_quote_rejects_missing_provider_price(monkeypatch):
 
     with pytest.raises(ValueError, match="no usable current quote"):
         quotes.fetch_quote_info("AAPL")
+
+
+@pytest.mark.parametrize("price, expected", [(171.26, -1.14), (171.10, -1.30), (172.40, 0.0)])
+def test_daily_change_compares_with_prior_close(price, expected):
+    change, percent = quotes.daily_price_change({"regularMarketPrice": price, "previousClose": 172.40})
+
+    assert change == pytest.approx(expected)
+    assert percent == pytest.approx(expected / 172.40 * 100)
+
+
+@pytest.mark.parametrize("price, previous_close", [(None, 100.0), (100.0, None), (100.0, 0.0), (100.0, float("nan"))])
+def test_daily_change_does_not_invent_missing_inputs(price, previous_close):
+    assert quotes.daily_price_change({"regularMarketPrice": price, "previousClose": previous_close}) == (None, None)

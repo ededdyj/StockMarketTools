@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Optional
 
 from data.fetcher import get_stock_data
 from data.market_inputs import get_market_inputs
-from data.quotes import QUOTE_FIELDS, QUOTE_REFRESH_SECONDS, fetch_quote_info
+from data.quotes import QUOTE_FIELDS, QUOTE_REFRESH_SECONDS, daily_price_change, fetch_quote_info
 from data.sec_facts import clear_sec_filing_cache
 from models.dcf_fit import DcfFitResult, calculate_dcf_fit
 from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assumptions
@@ -535,7 +535,8 @@ def resolve_timeframe(option: str) -> Tuple[Dict, str, str]:
     if option == "Intraday (1D)":
         return (
             {"period": "1d", "interval": "1m", "prepost": False},
-            "Displays 1-minute ticks for the current regular session.",
+            "Displays 1-minute ticks for the current regular session. Today's change "
+            "compares the latest regular-session quote with the previous trading day's close.",
             "1 trading day",
         )
     if option == "1 Week":
@@ -838,11 +839,7 @@ def render_financial_health_section(
             st.warning("\n".join(result.warnings))
 
 
-@st.fragment(run_every=QUOTE_REFRESH_SECONDS)
-def render_current_quote(ticker: str, last_close: float):
-    """Update prices while the session is open without rerunning analysis forms."""
-
-    info, error = _load_current_quote_cached(ticker)
+def _render_quote_values(info: Dict, error: str, last_close: float):
     current_price = next(
         (info.get(field) for field in ("regularMarketPrice", "currentPrice")
          if finite_number(info.get(field)) and info[field] > 0),
@@ -868,6 +865,32 @@ def render_current_quote(ticker: str, last_close: float):
         st.warning(error)
 
 
+@st.fragment(run_every=QUOTE_REFRESH_SECONDS)
+def render_current_quote(ticker: str, last_close: float, *, show_day_change: bool = False):
+    """Refresh the price and its day change together without rerunning analysis forms."""
+
+    info, error = _load_current_quote_cached(ticker)
+    if not show_day_change:
+        _render_quote_values(info, error, last_close)
+        return
+
+    col_price, col_delta = st.columns([2, 1])
+    with col_price:
+        _render_quote_values(info, error, last_close)
+    with col_delta:
+        change, percent = daily_price_change(info)
+        st.metric(
+            label="Today (vs previous close)",
+            value=f"{change:+.2f} USD" if change is not None else "N/A",
+            delta=f"{percent:+.2f}%" if percent is not None else None,
+        )
+        previous_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
+        if change is not None:
+            st.caption(f"Previous close: {format_currency(previous_close)}")
+        else:
+            st.caption("Day change requires a current quote and the previous trading day's close.")
+
+
 def render_price_section(history: pd.DataFrame, ticker: str, timeframe_option: str, timeframe_note: str):
     st.subheader(f"Price History ({timeframe_option})")
     st.caption(timeframe_note)
@@ -881,15 +904,18 @@ def render_price_section(history: pd.DataFrame, ticker: str, timeframe_option: s
     pts_change = end_price - start_price
     pct_change = (pts_change / start_price) * 100 if start_price else np.nan
 
-    col_price, col_delta = st.columns([2, 1])
-    with col_price:
-        render_current_quote(ticker, end_price)
-    with col_delta:
-        st.metric(
-            label=f"{timeframe_option} change (close-to-close)",
-            value=f"{pts_change:+.2f} USD" if not _is_nan(pts_change) else "N/A",
-            delta=f"{pct_change:+.2f}%" if not _is_nan(pct_change) else "N/A",
-        )
+    if timeframe_option == "Intraday (1D)":
+        render_current_quote(ticker, end_price, show_day_change=True)
+    else:
+        col_price, col_delta = st.columns([2, 1])
+        with col_price:
+            render_current_quote(ticker, end_price)
+        with col_delta:
+            st.metric(
+                label=f"{timeframe_option} change (close-to-close)",
+                value=f"{pts_change:+.2f} USD" if not _is_nan(pts_change) else "N/A",
+                delta=f"{pct_change:+.2f}%" if not _is_nan(pct_change) else "N/A",
+            )
 
     price_fig = plot_price_history(history)
     st.plotly_chart(price_fig, use_container_width=True)

@@ -30,6 +30,9 @@ the provider's quote time. Provider data may be delayed; this is polling Yahoo's
 feed, not a Google Finance or exchange streaming feed. Company profiles and
 historical charts remain cached for 15 minutes. Valuations use the quote from
 the latest analysis run; **Refresh company data** refreshes the analysis inputs.
+In **Intraday (1D)**, today's dollar and percent change compare the current
+regular-session quote with the previous trading day's close and refresh with the
+quote. Longer windows show the change between the first and last chart closes.
 
 ## Reviewing an Investment
 

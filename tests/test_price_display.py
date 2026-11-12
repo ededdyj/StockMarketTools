@@ -18,6 +18,7 @@ def price_app(monkeypatch):
     info = {
         "symbol": "AAPL", "regularMarketPrice": 150.0, "currentPrice": 148.0,
         "regularMarketTime": pd.Timestamp("2026-11-12 14:55:00Z").timestamp(),
+        "previousClose": 152.0,
     }
     # The final daily bar can lag the quote, even when today's bar is included.
     history = pd.DataFrame(
@@ -169,3 +170,44 @@ def test_quote_panel_schedules_automatic_refresh(price_app, monkeypatch):
     assert not app.exception
     assert timers
     assert all(interval == 15 and fragment_id for interval, fragment_id in timers)
+
+
+def test_daily_change_uses_previous_close_even_if_price_rose_since_open(price_app):
+    app, info, _ = price_app
+    # The quote is above the first chart price (140), but below yesterday's close.
+    info.update(regularMarketPrice=171.26, previousClose=172.40)
+    select_timeframe(app, "Intraday (1D)")
+
+    daily = next(item for item in app.metric if item.label == "Today (vs previous close)")
+    assert daily.value == "-1.14 USD"
+    assert daily.delta == "-0.66%"
+    assert any("Previous close: $172.40" in item.value for item in app.caption)
+    assert not any("Intraday (1D) change (close-to-close)" == item.label for item in app.metric)
+
+
+def test_daily_change_updates_from_the_same_quote_snapshot(price_app, monkeypatch):
+    app, info, _ = price_app
+    clock = [1000.0]
+    monkeypatch.setattr(cache_utils, "TTLCACHE_TIMER", lambda: clock[0])
+    select_timeframe(app, "Intraday (1D)")
+    daily = next(item for item in app.metric if item.label == "Today (vs previous close)")
+    assert daily.value == "-2.00 USD"
+
+    info["regularMarketPrice"] = 153.0
+    clock[0] += 16
+    app.run()
+    assert not app.exception
+    assert "Current Price: $153.00" in [item.value for item in app.header]
+    daily = next(item for item in app.metric if item.label == "Today (vs previous close)")
+    assert daily.value == "+1.00 USD"
+    assert daily.delta == "+0.66%"
+
+
+@pytest.mark.parametrize("previous_close", [None, float("nan"), 0.0])
+def test_daily_change_is_unavailable_without_a_previous_close(price_app, previous_close):
+    app, info, _ = price_app
+    info["previousClose"] = previous_close
+    select_timeframe(app, "Intraday (1D)")
+
+    daily = next(item for item in app.metric if item.label == "Today (vs previous close)")
+    assert daily.value == "N/A"
