@@ -120,6 +120,32 @@ def _load_stock_bundle_cached(ticker: str, timeframe_items: Tuple[Tuple[str, obj
     return get_stock_data(ticker, timeframe=timeframe_kwargs)
 
 
+@st.cache_data(show_spinner=False, ttl=900)
+def _load_stock_profile_cached(ticker: str) -> Dict:
+    """Share one quote/profile snapshot across every chart window for a ticker."""
+
+    info = yf.Ticker(ticker).info
+    if not info:
+        raise ValueError("Yahoo Finance returned an empty company profile.")
+    return info
+
+
+def _with_shared_stock_profile(ticker: str, data: Dict) -> Dict:
+    try:
+        info = _load_stock_profile_cached(ticker)
+    except Exception as exc:
+        logger.warning("Shared quote retrieval failed for %s: %s", ticker, exc)
+        st.warning("Current quote unavailable. Chart prices are still shown from historical data.")
+        # Preserve fundamentals without reviving a different quote from each window's cache.
+        info = dict(data.get("info") or {})
+        for field in (
+            "regularMarketPrice", "currentPrice", "regularMarketTime",
+            "preMarketPrice", "postMarketPrice",
+        ):
+            info.pop(field, None)
+    return {**data, "info": info}
+
+
 def _data_is_complete(data: Dict) -> bool:
     if not data:
         return False
@@ -380,6 +406,7 @@ def load_stock_bundle(ticker: str, timeframe_option: str, *, refresh: bool = Fal
     try:
         if refresh:
             clear_sec_filing_cache()
+            _load_stock_profile_cached.clear(ticker)
             _load_stock_bundle_cached.clear(ticker, timeframe_items)
         data = _load_stock_bundle_cached(ticker, timeframe_items)
     except Exception as exc:
@@ -428,7 +455,7 @@ def load_stock_bundle(ticker: str, timeframe_option: str, *, refresh: bool = Fal
                     " rely on the latest filings from Yahoo Finance."
                 )
                 logger.info("Using fallback timeframe for %s", ticker)
-                return fallback_data, "Fallback to trailing twelve months."
+                return _with_shared_stock_profile(ticker, fallback_data), "Fallback to trailing twelve months."
 
             st.error(
                 f"Yahoo Finance is missing both fundamentals and price history for {ticker}."
@@ -437,7 +464,7 @@ def load_stock_bundle(ticker: str, timeframe_option: str, *, refresh: bool = Fal
             logger.error("Yahoo returned empty data for %s even after refresh", ticker)
             return {}, timeframe_note
 
-    return data, timeframe_note
+    return _with_shared_stock_profile(ticker, data), timeframe_note
 
 
 def warn_if_data_missing(info: Dict, history: pd.DataFrame, cashflow: pd.DataFrame, ticker: str) -> None:
@@ -495,7 +522,6 @@ def resolve_timeframe(option: str) -> Tuple[Dict, str, str]:
     """Return yfinance history kwargs, note, and label for the UI."""
 
     now = pd.Timestamp.utcnow()
-    today_str = now.strftime("%Y-%m-%d")
     if option == "Intraday (1D)":
         return (
             {"period": "1d", "interval": "1m", "prepost": False},
@@ -537,7 +563,7 @@ def resolve_timeframe(option: str) -> Tuple[Dict, str, str]:
     if option == "3 Year":
         start_date = (now - pd.DateOffset(years=3)).strftime("%Y-%m-%d")
         return (
-            {"start": start_date, "end": today_str},
+            {"start": start_date},
             "Pulled from daily closes over the last three calendar years.",
             "3 years",
         )
@@ -827,7 +853,12 @@ def render_price_section(history: pd.DataFrame, info: Dict, timeframe_option: st
     with col_price:
         if current_price is not None:
             st.header(f"Current Price: {format_currency(current_price)}")
-            st.caption("Latest regular-session quote from Yahoo Finance; cached for up to 15 minutes.")
+            quote_time = pd.to_datetime(info.get("regularMarketTime"), unit="s", utc=True, errors="coerce")
+            time_note = (
+                f"Quote as of {quote_time.tz_convert('America/New_York').strftime('%b %d, %Y %I:%M %p %Z')}."
+                if pd.notna(quote_time) else "Quote timestamp unavailable."
+            )
+            st.caption(f"{time_note} Yahoo Finance regular-session quote; cached for up to 15 minutes.")
         else:
             st.header(f"Latest available close: {format_currency(end_price)}")
             st.caption("Current quote unavailable; showing the last close in this chart.")
