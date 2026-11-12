@@ -24,6 +24,13 @@ Market quotes and many statement inputs come from Yahoo Finance. Single-stock
 analysis can supplement those statements with SEC filing data. The screen uses
 the repository's saved constituent list in `data/`.
 
+The single-stock price panel automatically checks Yahoo Finance every 15 seconds
+while the session is open. All chart windows share the same quote cache and show
+the provider's quote time. Provider data may be delayed; this is polling Yahoo's
+feed, not a Google Finance or exchange streaming feed. Company profiles and
+historical charts remain cached for 15 minutes. Valuations use the quote from
+the latest analysis run; **Refresh company data** refreshes the analysis inputs.
+
 ## Reviewing an Investment
 
 1. From **Single Stock Analysis**, open **Investment Review**. You can also open

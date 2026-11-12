@@ -746,7 +746,9 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
         calculations=[
             "Cached single-stock data uses Streamlit cache with a 900-second TTL",
-            "All chart windows share one quote/profile cache per ticker; Refresh company data refreshes that shared snapshot",
+            "All chart windows share a 15-second quote cache per ticker; the price panel checks automatically every 15 seconds while the session is open",
+            "Company profiles and historical charts keep a 900-second cache; Refresh company data refreshes those inputs and the shared quote",
+            "Automatic quote checks update the price panel; valuations use the quote from the most recent analysis run",
             "The 1 Week chart requests five trading sessions, including the latest available daily bar",
             "Current Price uses the regular-session quote independently of the chart window; a missing quote is labeled Latest available close",
             "Chart-window changes compare the first and last historical closes, not the separate current quote",

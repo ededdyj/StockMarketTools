@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 
 from data.fetcher import get_stock_data
 from data.market_inputs import get_market_inputs
+from data.quotes import QUOTE_FIELDS, QUOTE_REFRESH_SECONDS, fetch_quote_info
 from data.sec_facts import clear_sec_filing_cache
 from models.dcf_fit import DcfFitResult, calculate_dcf_fit
 from models.dcf_assumptions import DynamicDcfEstimate, estimate_dynamic_dcf_assumptions
@@ -122,7 +123,7 @@ def _load_stock_bundle_cached(ticker: str, timeframe_items: Tuple[Tuple[str, obj
 
 @st.cache_data(show_spinner=False, ttl=900)
 def _load_stock_profile_cached(ticker: str) -> Dict:
-    """Share one quote/profile snapshot across every chart window for a ticker."""
+    """Share cached company fundamentals across every chart window for a ticker."""
 
     info = yf.Ticker(ticker).info
     if not info:
@@ -130,19 +131,27 @@ def _load_stock_profile_cached(ticker: str) -> Dict:
     return info
 
 
+@st.cache_data(show_spinner=False, ttl=QUOTE_REFRESH_SECONDS)
+def _load_current_quote_cached(ticker: str) -> Tuple[Dict, str]:
+    """Share short-lived price updates across windows, including failed attempts."""
+
+    try:
+        return fetch_quote_info(ticker), ""
+    except Exception as exc:
+        logger.warning("Quote update failed for %s: %s", ticker, exc)
+        return {}, "Current quote unavailable. Retrying automatically."
+
+
 def _with_shared_stock_profile(ticker: str, data: Dict) -> Dict:
     try:
         info = _load_stock_profile_cached(ticker)
     except Exception as exc:
-        logger.warning("Shared quote retrieval failed for %s: %s", ticker, exc)
-        st.warning("Current quote unavailable. Chart prices are still shown from historical data.")
-        # Preserve fundamentals without reviving a different quote from each window's cache.
+        logger.warning("Shared profile retrieval failed for %s: %s", ticker, exc)
         info = dict(data.get("info") or {})
-        for field in (
-            "regularMarketPrice", "currentPrice", "regularMarketTime",
-            "preMarketPrice", "postMarketPrice",
-        ):
-            info.pop(field, None)
+    # A slow-moving profile must never reintroduce old prices into a new quote.
+    info = {key: value for key, value in info.items() if key not in QUOTE_FIELDS}
+    quote, _ = _load_current_quote_cached(ticker)
+    info.update(quote)
     return {**data, "info": info}
 
 
@@ -407,6 +416,7 @@ def load_stock_bundle(ticker: str, timeframe_option: str, *, refresh: bool = Fal
         if refresh:
             clear_sec_filing_cache()
             _load_stock_profile_cached.clear(ticker)
+            _load_current_quote_cached.clear(ticker)
             _load_stock_bundle_cached.clear(ticker, timeframe_items)
         data = _load_stock_bundle_cached(ticker, timeframe_items)
     except Exception as exc:
@@ -828,7 +838,37 @@ def render_financial_health_section(
             st.warning("\n".join(result.warnings))
 
 
-def render_price_section(history: pd.DataFrame, info: Dict, timeframe_option: str, timeframe_note: str):
+@st.fragment(run_every=QUOTE_REFRESH_SECONDS)
+def render_current_quote(ticker: str, last_close: float):
+    """Update prices while the session is open without rerunning analysis forms."""
+
+    info, error = _load_current_quote_cached(ticker)
+    current_price = next(
+        (info.get(field) for field in ("regularMarketPrice", "currentPrice")
+         if finite_number(info.get(field)) and info[field] > 0),
+        None,
+    )
+    if current_price is not None:
+        st.header(f"Current Price: {format_currency(current_price)}")
+        quote_time = pd.to_datetime(info.get("regularMarketTime"), unit="s", utc=True, errors="coerce")
+        time_note = (
+            f"Quote as of {quote_time.tz_convert('America/New_York').strftime('%b %d, %Y %I:%M %p %Z')}."
+            if pd.notna(quote_time) else "Quote timestamp unavailable."
+        )
+        st.caption(f"{time_note} Yahoo Finance regular-session quote; checks every {QUOTE_REFRESH_SECONDS} seconds. Data may be delayed.")
+    else:
+        st.header(f"Latest available close: {format_currency(last_close)}")
+        st.caption("Current quote unavailable; showing the last close in this chart.")
+    st.caption(
+        f"Pre-market: {format_currency(info.get('preMarketPrice'))} | "
+        f"Post-market: {format_currency(info.get('postMarketPrice'))}"
+    )
+    st.caption("Valuations use the quote from the last analysis run. Refresh company data to update them.")
+    if error:
+        st.warning(error)
+
+
+def render_price_section(history: pd.DataFrame, ticker: str, timeframe_option: str, timeframe_note: str):
     st.subheader(f"Price History ({timeframe_option})")
     st.caption(timeframe_note)
 
@@ -841,30 +881,9 @@ def render_price_section(history: pd.DataFrame, info: Dict, timeframe_option: st
     pts_change = end_price - start_price
     pct_change = (pts_change / start_price) * 100 if start_price else np.nan
 
-    pre_market_val = info.get("preMarketPrice")
-    post_market_val = info.get("postMarketPrice")
-    current_price = next(
-        (info.get(field) for field in ("regularMarketPrice", "currentPrice")
-         if finite_number(info.get(field)) and info[field] > 0),
-        None,
-    )
-
     col_price, col_delta = st.columns([2, 1])
     with col_price:
-        if current_price is not None:
-            st.header(f"Current Price: {format_currency(current_price)}")
-            quote_time = pd.to_datetime(info.get("regularMarketTime"), unit="s", utc=True, errors="coerce")
-            time_note = (
-                f"Quote as of {quote_time.tz_convert('America/New_York').strftime('%b %d, %Y %I:%M %p %Z')}."
-                if pd.notna(quote_time) else "Quote timestamp unavailable."
-            )
-            st.caption(f"{time_note} Yahoo Finance regular-session quote; cached for up to 15 minutes.")
-        else:
-            st.header(f"Latest available close: {format_currency(end_price)}")
-            st.caption("Current quote unavailable; showing the last close in this chart.")
-        st.caption(
-            f"Pre-market: {format_currency(pre_market_val)} | Post-market: {format_currency(post_market_val)}"
-        )
+        render_current_quote(ticker, end_price)
     with col_delta:
         st.metric(
             label=f"{timeframe_option} change (close-to-close)",
@@ -1499,7 +1518,7 @@ def single_stock_analysis(philosophy, mode_description: str):
     else:
         st.info("Company fundamentals are unavailable for this ticker from Yahoo Finance.")
     render_financial_health_section(financial_health, financial_health_source, sec_warnings)
-    render_price_section(history, info, timeframe_option, timeframe_note)
+    render_price_section(history, ticker, timeframe_option, timeframe_note)
     render_cashflow_section(cashflow)
     if assumptions_valid:
         prompt_valuation = None

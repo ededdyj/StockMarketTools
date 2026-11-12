@@ -5,8 +5,10 @@ import pandas as pd
 import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
+from streamlit.testing.v1.local_script_runner import LocalScriptRunner
+from streamlit.runtime.caching import cache_utils
 
-from data import fetcher, market_inputs
+from data import fetcher, market_inputs, quotes
 
 
 @pytest.fixture
@@ -35,6 +37,7 @@ def price_app(monkeypatch):
 
     monkeypatch.setattr(fetcher, "get_stock_data", fetch)
     monkeypatch.setattr(fetcher.yf, "Ticker", lambda ticker: SimpleNamespace(info=info.copy()))
+    monkeypatch.setattr(quotes, "fetch_quote_info", lambda ticker: info.copy())
     monkeypatch.setattr(
         market_inputs, "get_market_inputs",
         lambda: market_inputs.MarketInputs(0.045, 0.05, "Test", "Test", []),
@@ -123,9 +126,46 @@ def test_shared_quote_failure_does_not_reuse_timeframe_quote(price_app, monkeypa
     def fail(ticker):
         raise RuntimeError("Provider unavailable")
 
-    monkeypatch.setattr(fetcher.yf, "Ticker", fail)
+    monkeypatch.setattr(quotes, "fetch_quote_info", fail)
     select_timeframe(app, "1 Week")
 
     assert "Latest available close: $149.00" in [item.value for item in app.header]
     assert not any(item.value.startswith("Current Price:") for item in app.header)
     assert any("Current quote unavailable" in item.value for item in app.warning)
+
+
+def test_quote_expires_after_fifteen_seconds_without_refetching_history(price_app, monkeypatch):
+    app, info, calls = price_app
+    clock = [1000.0]
+    monkeypatch.setattr(cache_utils, "TTLCACHE_TIMER", lambda: clock[0])
+    select_timeframe(app, "1 Week")
+    initial_history_calls = len(calls)
+
+    info["regularMarketPrice"] = 151.0
+    clock[0] += 14
+    app.run()
+    assert "Current Price: $150.00" in [item.value for item in app.header]
+
+    clock[0] += 2
+    app.run()
+    assert not app.exception
+    assert "Current Price: $151.00" in [item.value for item in app.header]
+    assert len(calls) == initial_history_calls
+
+
+def test_quote_panel_schedules_automatic_refresh(price_app, monkeypatch):
+    app, _, _ = price_app
+    timers = []
+    enqueue = LocalScriptRunner._enqueue_forward_msg
+
+    def capture(self, msg):
+        if msg.WhichOneof("type") == "auto_rerun":
+            timers.append((msg.auto_rerun.interval, msg.auto_rerun.fragment_id))
+        return enqueue(self, msg)
+
+    monkeypatch.setattr(LocalScriptRunner, "_enqueue_forward_msg", capture)
+    app.run()
+
+    assert not app.exception
+    assert timers
+    assert all(interval == 15 and fragment_id for interval, fragment_id in timers)

@@ -3,7 +3,51 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
+import yfinance as yf
+
 from models.investment_review import finite_number
+
+
+QUOTE_REFRESH_SECONDS = 15
+QUOTE_FIELDS = (
+    "regularMarketPrice", "currentPrice", "regularMarketTime",
+    "preMarketPrice", "preMarketTime", "postMarketPrice", "postMarketTime",
+)
+
+
+def fetch_quote_info(ticker: str) -> dict:
+    """Read current prices from Yahoo's chart feed without reloading fundamentals."""
+
+    stock = yf.Ticker(ticker)
+    history = stock.history(
+        period="1d", interval="1m", prepost=True, auto_adjust=False,
+        timeout=10, raise_errors=True,
+    )
+    metadata = stock.history_metadata or {}
+    price = metadata.get("regularMarketPrice")
+    if not finite_number(price) or price <= 0:
+        raise ValueError("Yahoo Finance returned no usable current quote.")
+    info = {
+        "regularMarketPrice": price,
+        "currentPrice": price,
+        "regularMarketTime": metadata.get("regularMarketTime"),
+    }
+    # Extended-hours bars are separate from the regular-session quote.
+    if not history.empty and isinstance(history.index, pd.DatetimeIndex) and "Close" in history:
+        closes = history["Close"].dropna().sort_index()
+        periods = metadata.get("currentTradingPeriod") or {}
+        for session in ("pre", "post"):
+            period = periods.get(session) or {}
+            start, end = period.get("start"), period.get("end")
+            if not finite_number(start) or not finite_number(end):
+                continue
+            timestamps = closes.index.asi8 / 1_000_000_000
+            session_closes = closes[(timestamps >= start) & (timestamps < end)]
+            if not session_closes.empty:
+                info[f"{session}MarketPrice"] = float(session_closes.iloc[-1])
+                info[f"{session}MarketTime"] = session_closes.index[-1].timestamp()
+    return info
 
 
 @dataclass(frozen=True)
