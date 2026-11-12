@@ -746,6 +746,9 @@ KNOWLEDGE_NODES: list[KnowledgeNode] = [
         ],
         calculations=[
             "Cached single-stock data uses Streamlit cache with a 900-second TTL",
+            "The 1 Week chart requests five trading sessions, including the latest available daily bar",
+            "Current Price uses the regular-session quote independently of the chart window; a missing quote is labeled Latest available close",
+            "Chart-window changes compare the first and last historical closes, not the separate current quote",
             "Ticker CSVs are cached with Streamlit cache_data",
             "Screeners collect skipped-ticker reasons for missing inputs and exceptions",
         ],

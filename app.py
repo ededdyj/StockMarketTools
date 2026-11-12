@@ -17,6 +17,7 @@ from models.dcf_warnings import DcfWarning, generate_dcf_warnings
 from models.dividend_yield import resolve_dividend_yield
 from models.free_cash_flow import FreeCashFlowSnapshot, resolve_free_cash_flow
 from models.income_metrics import resolve_income_metrics
+from models.investment_review import finite_number
 from models.provenance import DataFreshnessReport, build_valuation_input_provenance
 from models.valuation import (
     DcfAssumptions,
@@ -502,10 +503,11 @@ def resolve_timeframe(option: str) -> Tuple[Dict, str, str]:
             "1 trading day",
         )
     if option == "1 Week":
-        start_date = (now - pd.DateOffset(days=7)).strftime("%Y-%m-%d")
         return (
-            {"start": start_date, "end": today_str},
-            "Shows the last five trading days; weekends and holidays are skipped.",
+            # An explicit end=today is exclusive and would omit today's session.
+            {"period": "5d", "interval": "1d", "prepost": False},
+            "Shows daily closes for the last five trading sessions, including the latest "
+            "available session. Today's daily bar can change while the market is open.",
             "1 week (close-to-close)",
         )
     if option == "1 Month":
@@ -815,10 +817,20 @@ def render_price_section(history: pd.DataFrame, info: Dict, timeframe_option: st
 
     pre_market_val = info.get("preMarketPrice")
     post_market_val = info.get("postMarketPrice")
+    current_price = next(
+        (info.get(field) for field in ("regularMarketPrice", "currentPrice")
+         if finite_number(info.get(field)) and info[field] > 0),
+        None,
+    )
 
     col_price, col_delta = st.columns([2, 1])
     with col_price:
-        st.header(f"Current Price: {format_currency(end_price)}")
+        if current_price is not None:
+            st.header(f"Current Price: {format_currency(current_price)}")
+            st.caption("Latest regular-session quote from Yahoo Finance; cached for up to 15 minutes.")
+        else:
+            st.header(f"Latest available close: {format_currency(end_price)}")
+            st.caption("Current quote unavailable; showing the last close in this chart.")
         st.caption(
             f"Pre-market: {format_currency(pre_market_val)} | Post-market: {format_currency(post_market_val)}"
         )
